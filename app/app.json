@@ -1,0 +1,35 @@
+{
+  "expo": {
+    "name": "TubeLens",
+    "slug": "tubelens",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "tubelens",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/images/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#000000"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.roanjtaylor.tubelens",
+      "infoPlist": {
+        "NSAppTransportSecurity": { "NSAllowsArbitraryLoads": true },
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "web": { "bundler": "metro", "output": "static" },
+    "plugins": [
+      "expo-router",
+      ["expo-build-properties", { "ios": { "deploymentTarget": "15.1" } }]
+    ],
+    "experiments": { "typedRoutes": true },
+    "extra": {
+      "apiBase": "http://192.168.1.100:8788",
+      "appKey": "CHANGE-ME-same-as-backend-config"
+    }
+  }
+}
