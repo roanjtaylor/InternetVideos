@@ -3,7 +3,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, FlatList, Image, Pressable, RefreshControl, StyleSheet } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
-import { api, Playlist } from '@/lib/api';
+import { api, Playlist, timeAgo } from '@/lib/api';
 
 export default function PlaylistsScreen() {
   const router = useRouter();
@@ -57,7 +57,9 @@ export default function PlaylistsScreen() {
             <Text style={styles.title} numberOfLines={2}>
               {item.title}
             </Text>
-            <Text style={styles.sub}>{item.itemCount} videos</Text>
+            <Text style={styles.sub}>
+              {item.itemCount} videos{item.lastAdded ? ` · added ${timeAgo(item.lastAdded)}` : ''}
+            </Text>
           </View>
         </Pressable>
       )}

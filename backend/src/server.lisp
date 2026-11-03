@@ -52,11 +52,28 @@
 (define-api api-playlists "/playlists"
   (respond-json (obj "playlists" (cached "playlists" (* 5 60) #'my-playlists))))
 
+(defun paged-playlist-response (cache-prefix playlist-id page &key shorts-removed)
+  (destructuring-bind (videos . next)
+      (cached (format nil "~A:~A:~A" cache-prefix playlist-id (or page "")) (* 5 60)
+              (lambda ()
+                (multiple-value-bind (videos next) (playlist-videos playlist-id :page-token page)
+                  (cons (if shorts-removed (remove-shorts videos) videos) next))))
+    (respond-json (obj "videos" videos "nextPage" (or next 'null)))))
+
 (define-api api-playlist-items "/playlist"
   (let ((id (ht:get-parameter "id")))
     (unless id (return-from handler (respond-json (obj "error" "id required") 400)))
-    (respond-json (obj "videos" (cached (concatenate 'string "pl:" id) (* 5 60)
-                                        (lambda () (playlist-videos id)))))))
+    (paged-playlist-response "pl" id (ht:get-parameter "page"))))
+
+(define-api api-subscriptions "/subscriptions"
+  (respond-json (obj "channels" (cached "subscriptions" (* 30 60) #'my-subscriptions))))
+
+(define-api api-channel "/channel"
+  (let ((id (ht:get-parameter "id")))
+    (unless (and id (> (length id) 2))
+      (return-from handler (respond-json (obj "error" "id required") 400)))
+    (paged-playlist-response "ch" (uploads-playlist-id id) (ht:get-parameter "page")
+                             :shorts-removed t)))
 
 (define-api api-search "/search"
   (let ((q (ht:get-parameter "q")))

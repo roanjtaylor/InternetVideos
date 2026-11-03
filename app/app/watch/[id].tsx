@@ -1,4 +1,5 @@
-import { Stack, useLocalSearchParams } from 'expo-router';
+import FontAwesome from '@expo/vector-icons/FontAwesome';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import { Pressable, StyleSheet, useWindowDimensions } from 'react-native';
 import YoutubePlayer, { PLAYER_STATES } from 'react-native-youtube-iframe';
@@ -12,6 +13,7 @@ import { Text, View } from '@/components/Themed';
  */
 export default function WatchScreen() {
   const { id, title } = useLocalSearchParams<{ id: string; title?: string }>();
+  const router = useRouter();
   const { width } = useWindowDimensions();
   const height = Math.round((width * 9) / 16);
 
@@ -56,6 +58,12 @@ export default function WatchScreen() {
       </View>
       <View style={styles.meta}>
         <Text style={styles.title}>{title}</Text>
+        <Pressable
+          onPress={() => router.push({ pathname: '/save/[id]', params: { id, title } })}
+          style={({ pressed }) => [styles.save, pressed && { opacity: 0.6 }]}>
+          <FontAwesome name="bookmark-o" size={16} color="#2f95dc" />
+          <Text style={styles.saveText}>Save to playlist</Text>
+        </Pressable>
       </View>
     </View>
   );
@@ -73,4 +81,6 @@ const styles = StyleSheet.create({
   overlaySub: { color: '#aaa', fontSize: 14, marginTop: 6 },
   meta: { padding: 16 },
   title: { fontSize: 18, fontWeight: '600' },
+  save: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 16 },
+  saveText: { color: '#2f95dc', fontSize: 15, fontWeight: '600' },
 });

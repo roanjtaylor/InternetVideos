@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "TubeLens",
+    "name": "Videos",
     "slug": "tubelens",
     "version": "0.1.0",
     "orientation": "portrait",
@@ -36,7 +36,8 @@
             "deploymentTarget": "15.1"
           }
         }
-      ]
+      ],
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true

@@ -105,10 +105,22 @@
 
 ;;; Public queries ------------------------------------------------------
 
-(defun subscribed-channel-ids ()
+(defun my-subscriptions ()
+  "Subscribed channels, alphabetical. 1 unit per 50 subscriptions."
   (let ((subs (yt-get-all "subscriptions"
-                          '(("part" . "snippet") ("mine" . "true") ("maxResults" . "50")))))
-    (loop for s across subs collect (jget s "snippet" "resourceId" "channelId"))))
+                          '(("part" . "snippet") ("mine" . "true")
+                            ("order" . "alphabetical") ("maxResults" . "50")))))
+    (map 'vector
+         (lambda (s)
+           (let ((sn (jget s "snippet")))
+             (obj "id" (jget sn "resourceId" "channelId")
+                  "title" (jget sn "title")
+                  "thumbnail" (or (jget sn "thumbnails" "medium" "url")
+                                  (jget sn "thumbnails" "default" "url")))))
+         subs)))
+
+(defun subscribed-channel-ids ()
+  (loop for c across (my-subscriptions) collect (jget c "id")))
 
 (defun uploads-playlist-id (channel-id)
   "A channel's uploads playlist is its id with the UC prefix swapped for UU."
@@ -132,27 +144,88 @@
     (let ((v (sort-newest (coerce videos 'vector))))
       (attach-durations (subseq v 0 (min limit (length v)))))))
 
-(defun my-playlists ()
-  (let ((items (yt-get-all "playlists"
-                           '(("part" . "snippet,contentDetails") ("mine" . "true") ("maxResults" . "50")))))
-    (map 'vector
-         (lambda (p)
-           (obj "id" (jget p "id")
-                "title" (jget p "snippet" "title")
-                "itemCount" (jget p "contentDetails" "itemCount")
-                "thumbnail" (best-thumb (jget p "snippet"))))
-         items)))
+(defun liked-videos-playlist ()
+  "YouTube omits the system playlists (LL = Liked videos, WL = Watch Later)
+from playlists.list, but playlistItems.list still serves LL under OAuth.
+WL has been API-inaccessible since 2016, so only LL is synthesised here."
+  (let* ((resp (yt-get "playlistItems"
+                       '(("part" . "snippet") ("playlistId" . "LL") ("maxResults" . "1"))))
+         (first (let ((items (jget resp "items")))
+                  (and items (plusp (length items)) (aref items 0)))))
+    (obj "id" "LL"
+         "title" "Liked videos"
+         "itemCount" (or (jget resp "pageInfo" "totalResults") 0)
+         "thumbnail" (and first (best-thumb (jget first "snippet"))))))
 
-(defun playlist-videos (playlist-id)
-  (let ((items (yt-get-all "playlistItems"
-                           `(("part" . "snippet,contentDetails")
-                             ("playlistId" . ,playlist-id)
-                             ("maxResults" . "50"))
-                           :max-pages 4)))
-    (attach-durations
-     (remove-if (lambda (v) (member (jget v "title") '("Private video" "Deleted video")
-                                    :test #'equal))
-                (map 'vector #'video-from-playlist-item items)))))
+(defun playlist-last-added (playlist-id &key (max-pages 5))
+  "ISO date of the newest addition: the max playlistItem snippet.publishedAt,
+which is the time the video was saved to the playlist. 1 unit per 50 items."
+  (let ((latest "") (token nil))
+    (loop repeat max-pages
+          do (let* ((params `(("part" . "snippet") ("playlistId" . ,playlist-id)
+                              ("maxResults" . "50")))
+                    (resp (yt-get "playlistItems"
+                                  (if token (cons (cons "pageToken" token) params) params))))
+               (loop for it across (or (jget resp "items") #())
+                     do (let ((added (or (jget it "snippet" "publishedAt") "")))
+                          (when (string> added latest) (setf latest added))))
+               (setf token (jget resp "nextPageToken"))
+               (unless token (return))))
+    (if (string= latest "") nil latest)))
+
+(defun my-playlists ()
+  "Liked videos plus your own playlists, newest addition first."
+  (let* ((items (yt-get-all "playlists"
+                            '(("part" . "snippet,contentDetails") ("mine" . "true") ("maxResults" . "50"))))
+         (playlists
+           (concatenate
+            'vector
+            (handler-case (vector (liked-videos-playlist))
+              (error (e) (format *error-output* "playlists: skipping LL: ~A~%" e) #()))
+            (map 'vector
+                 (lambda (p)
+                   (obj "id" (jget p "id")
+                        "title" (jget p "snippet" "title")
+                        "itemCount" (jget p "contentDetails" "itemCount")
+                        "thumbnail" (best-thumb (jget p "snippet"))
+                        "lastAdded" (jget p "snippet" "publishedAt")))
+                 items)))
+         ;; Date-added lookups are independent network calls: run them in parallel.
+         (threads
+           (map 'list
+                (lambda (p)
+                  (bt:make-thread
+                   (lambda ()
+                     (handler-case
+                         (let* ((id (jget p "id"))
+                                (added (playlist-last-added
+                                        id :max-pages (if (equal id "LL") 1 5))))
+                           (when added (setf (gethash "lastAdded" p) added)))
+                       (error (e) (format *error-output* "playlists: lastAdded ~A: ~A~%"
+                                          (jget p "id") e))))))
+                playlists)))
+    (mapc #'bt:join-thread threads)
+    (sort playlists #'string> :key (lambda (p) (or (jget p "lastAdded") "")))))
+
+(defun playlist-videos (playlist-id &key page-token (pages 2))
+  "One app page: up to PAGES API pages of 50 starting at PAGE-TOKEN.
+Returns (values videos next-page-token-or-nil)."
+  (let ((items '()) (token page-token))
+    (loop repeat pages
+          do (let* ((params `(("part" . "snippet,contentDetails")
+                              ("playlistId" . ,playlist-id)
+                              ("maxResults" . "50")))
+                    (resp (yt-get "playlistItems"
+                                  (if token (cons (cons "pageToken" token) params) params))))
+               (loop for it across (or (jget resp "items") #()) do (push it items))
+               (setf token (jget resp "nextPageToken"))
+               (unless token (return))))
+    (values
+     (attach-durations
+      (remove-if (lambda (v) (member (jget v "title") '("Private video" "Deleted video")
+                                     :test #'equal))
+                 (map 'vector #'video-from-playlist-item (nreverse items))))
+     token)))
 
 (defun search-videos (query)
   "100 units per call: keep it deliberate."

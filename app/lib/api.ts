@@ -1,44 +1,45 @@
-export type Video = {
-  id: string;
-  title: string;
-  channelId: string;
-  channelTitle: string;
-  publishedAt: string;
-  thumbnail: string | null;
-  duration?: number; // seconds
-};
+/**
+ * The screens' data layer. Same shape the old HTTP client exposed, now backed
+ * by direct YouTube API calls on the device with caching in front.
+ */
+import { cached, clearCache } from './cache';
+import * as yt from './youtube';
 
-export type Playlist = {
-  id: string;
-  title: string;
-  itemCount: number;
-  thumbnail: string | null;
-};
+export type { Channel, Page, Playlist, Video } from './youtube';
 
-// Set in app/.env (gitignored); see .env.example.
-export const API_BASE = (process.env.EXPO_PUBLIC_API_BASE ?? 'http://localhost:8788').replace(/\/$/, '');
-const APP_KEY = process.env.EXPO_PUBLIC_APP_KEY ?? '';
-
-async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, { headers: { 'X-App-Key': APP_KEY } });
-  const text = await res.text();
-  let body: any;
-  try {
-    body = JSON.parse(text);
-  } catch {
-    throw new Error(`Bad response from ${path}: ${text.slice(0, 200)}`);
-  }
-  if (!res.ok) throw new Error(body?.error ?? `HTTP ${res.status}`);
-  return body as T;
-}
+const MIN = 60;
 
 export const api = {
-  health: () => get<{ ok: boolean; authorized: boolean }>('/health'),
-  feed: () => get<{ videos: Video[] }>('/feed'),
-  playlists: () => get<{ playlists: Playlist[] }>('/playlists'),
-  playlist: (id: string) => get<{ videos: Video[] }>(`/playlist?id=${encodeURIComponent(id)}`),
-  search: (q: string) => get<{ videos: Video[] }>(`/search?q=${encodeURIComponent(q)}`),
-  refresh: () => get<{ ok: boolean }>('/refresh'),
+  feed: async () => ({ videos: await cached('feed', 15 * MIN, () => yt.subscriptionsFeed()) }),
+  subscriptions: async () => ({ channels: await cached('subscriptions', 30 * MIN, yt.mySubscriptions) }),
+  channel: (id: string, page?: string | null) =>
+    cached(`ch:${id}:${page ?? ''}`, 5 * MIN, () =>
+      yt.playlistVideos(yt.uploadsPlaylistId(id), page, { dropShorts: true }),
+    ),
+  playlists: async () => ({ playlists: await cached('playlists', 5 * MIN, yt.myPlaylists) }),
+  playlist: (id: string, page?: string | null) =>
+    cached(`pl:${id}:${page ?? ''}`, 5 * MIN, () => yt.playlistVideos(id, page)),
+  search: async (q: string) => ({
+    videos: await cached(`q:${q.toLowerCase()}`, 60 * MIN, () => yt.searchVideos(q)),
+  }),
+
+  /** Writes invalidate the playlist caches so the next view reflects them. */
+  addToPlaylist: async (playlistId: string, videoId: string) => {
+    await yt.addToPlaylist(playlistId, videoId);
+    await Promise.all([clearCache('playlists'), clearCache(`pl:${playlistId}`)]);
+  },
+  createPlaylist: async (title: string) => {
+    const p = await yt.createPlaylist(title);
+    await clearCache('playlists');
+    return p;
+  },
+  like: async (videoId: string) => {
+    await yt.rateVideo(videoId, 'like');
+    await Promise.all([clearCache('playlists'), clearCache('pl:LL')]);
+  },
+
+  refresh: () => clearCache(),
+  quota: yt.quotaStatus,
 };
 
 export function formatDuration(seconds?: number): string {

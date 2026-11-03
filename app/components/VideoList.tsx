@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 
 import { Text, View } from '@/components/Themed';
-import { formatDuration, timeAgo, Video } from '@/lib/api';
+import { formatDuration, Page, timeAgo, Video } from '@/lib/api';
 
 export function VideoRow({ video }: { video: Video }) {
   const router = useRouter();
@@ -43,29 +43,58 @@ export function VideoRow({ video }: { video: Video }) {
 }
 
 type Props = {
-  load: () => Promise<Video[]>;
+  /** Return one page. A plain Video[] means the whole list; a Page may carry a nextPage token. */
+  load: (page?: string | null) => Promise<Video[] | Page>;
   emptyText?: string;
 };
 
+function asPage(r: Video[] | Page): Page {
+  return Array.isArray(r) ? { videos: r, nextPage: null } : r;
+}
+
 export function VideoList({ load, emptyText = 'Nothing here.' }: Props) {
   const [videos, setVideos] = useState<Video[] | null>(null);
+  const [nextPage, setNextPage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const busy = useRef(false);
 
   const run = useCallback(async () => {
     setError(null);
     try {
-      setVideos(await load());
+      const page = asPage(await load());
+      setVideos(page.videos);
+      setNextPage(page.nextPage ?? null);
     } catch (e: any) {
       setError(e.message ?? String(e));
     }
   }, [load]);
 
+  const loadMore = useCallback(async () => {
+    if (!nextPage || busy.current) return;
+    busy.current = true;
+    setLoadingMore(true);
+    try {
+      const page = asPage(await load(nextPage));
+      setVideos((prev) => {
+        const seen = new Set((prev ?? []).map((v) => v.id));
+        return [...(prev ?? []), ...page.videos.filter((v) => !seen.has(v.id))];
+      });
+      setNextPage(page.nextPage ?? null);
+    } catch (e: any) {
+      setError(e.message ?? String(e));
+    } finally {
+      busy.current = false;
+      setLoadingMore(false);
+    }
+  }, [load, nextPage]);
+
   useEffect(() => {
     run();
   }, [run]);
 
-  if (error) {
+  if (error && !videos) {
     return (
       <View style={styles.center}>
         <Text style={styles.error}>{error}</Text>
@@ -87,10 +116,24 @@ export function VideoList({ load, emptyText = 'Nothing here.' }: Props) {
       data={videos}
       keyExtractor={(v) => v.id}
       renderItem={({ item }) => <VideoRow video={item} />}
+      onEndReached={loadMore}
+      onEndReachedThreshold={1.5}
       ListEmptyComponent={
         <View style={styles.center}>
           <Text>{emptyText}</Text>
         </View>
+      }
+      ListFooterComponent={
+        loadingMore ? (
+          <View style={styles.footer}>
+            <ActivityIndicator />
+          </View>
+        ) : error ? (
+          <Pressable onPress={loadMore} style={styles.footer}>
+            <Text style={styles.error}>{error}</Text>
+            <Text style={styles.retry}>Retry</Text>
+          </Pressable>
+        ) : null
       }
       refreshControl={
         <RefreshControl
@@ -125,6 +168,7 @@ const styles = StyleSheet.create({
   title: { fontSize: 15, fontWeight: '600' },
   sub: { fontSize: 13, marginTop: 4 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
+  footer: { alignItems: 'center', padding: 16 },
   error: { color: '#d33', textAlign: 'center', marginBottom: 12 },
   retry: { color: '#2f95dc', fontSize: 16 },
 });
