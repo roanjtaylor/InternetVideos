@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "Videos",
-    "slug": "tubelens",
+    "name": "Internet Vids",
+    "slug": "internet-vids",
     "version": "0.1.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "tubelens",
+    "scheme": "internetvids",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {

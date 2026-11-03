@@ -1,4 +1,4 @@
-(in-package #:tubelens)
+(in-package #:internet-vids)
 
 (defparameter *api-base* "https://www.googleapis.com/youtube/v3/")
 

@@ -24,7 +24,7 @@ export default function SignInScreen() {
   return (
     <View style={styles.container}>
       <Stack.Screen options={{ headerShown: false }} />
-      <Text style={styles.title}>Videos</Text>
+      <Text style={styles.title}>Internet Vids</Text>
       <Text style={styles.sub}>
         Your subscriptions, playlists and search. Nothing recommended, no Shorts.
       </Text>

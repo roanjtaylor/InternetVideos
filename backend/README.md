@@ -1,4 +1,4 @@
-# TubeLens backend (SBCL)
+# Internet Vids backend (SBCL)
 
 > **Superseded.** Since November 2026 the app calls the YouTube API directly
 > from the phone (see `app/lib/youtube.ts`), so this server is optional and

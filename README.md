@@ -1,4 +1,4 @@
-# TubeLens
+# Internet Vids
 
 A distraction-free YouTube for iPhone: subscriptions, playlists and search.
 No home feed, no recommendations, no Shorts, no comments, no autoplay-next.
@@ -12,7 +12,7 @@ No home feed, no recommendations, no Shorts, no comments, no autoplay-next.
 ## One-time setup
 
 ### 1. Google Cloud (10 minutes)
-1. https://console.cloud.google.com → new project, e.g. `tubelens`.
+1. https://console.cloud.google.com → new project, e.g. `internet-vids`.
 2. APIs & Services → Library → enable **YouTube Data API v3**.
 3. APIs & Services → OAuth consent screen → External. Add yourself under
    **Test users**. Add scope `.../auth/youtube` (read and write: the app saves

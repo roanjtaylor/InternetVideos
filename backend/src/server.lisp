@@ -1,4 +1,4 @@
-(in-package #:tubelens)
+(in-package #:internet-vids)
 
 (defvar *server* nil)
 
@@ -100,7 +100,7 @@
               (bt:with-lock-held (*auth-done-lock*)
                 (setf *auth-finished* t)
                 (bt:condition-notify *auth-done*))
-              "<h1>TubeLens is authorized.</h1><p>Close this tab and return to the terminal.</p>")
+              "<h1>Internet Vids is authorized.</h1><p>Close this tab and return to the terminal.</p>")
         (t "<h1>Missing code</h1>")))
 
 ;;; Lifecycle -------------------------------------------------------------
@@ -112,7 +112,7 @@
     (setf *server* (make-instance 'ht:easy-acceptor :port port :address "0.0.0.0"
                                                     :access-log-destination nil))
     (ht:start *server*)
-    (format t "TubeLens listening on http://0.0.0.0:~A~%" port)
+    (format t "Internet Vids listening on http://0.0.0.0:~A~%" port)
     *server*))
 
 (defun stop ()

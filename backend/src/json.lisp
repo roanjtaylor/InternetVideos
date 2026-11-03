@@ -1,4 +1,4 @@
-(in-package #:tubelens)
+(in-package #:internet-vids)
 
 (defun obj (&rest kvs)
   "Build a JSON object (equal hash-table) from alternating key/value args."
