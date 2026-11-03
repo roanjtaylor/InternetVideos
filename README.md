@@ -34,8 +34,8 @@ both devices and use the laptop's Tailscale IP. Allow port 8788 through
 Windows Firewall for the private network.
 
 ### 3. App config
-Edit `app/app.json` → `extra.apiBase` (your laptop's IP) and `extra.appKey`
-(same string as `backend/config.json`).
+Copy `app/.env.example` to `app/.env` and set your laptop's IP and the same
+`app_key` as `backend/config.json`.
 
 ### 4. Build for the iPhone 7 (no Mac needed)
 Requires an Apple Developer Program membership.

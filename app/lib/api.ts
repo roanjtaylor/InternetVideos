@@ -1,5 +1,3 @@
-import Constants from 'expo-constants';
-
 export type Video = {
   id: string;
   title: string;
@@ -17,11 +15,9 @@ export type Playlist = {
   thumbnail: string | null;
 };
 
-type Extra = { apiBase?: string; appKey?: string };
-const extra = (Constants.expoConfig?.extra ?? {}) as Extra;
-
-export const API_BASE = (extra.apiBase ?? 'http://localhost:8788').replace(/\/$/, '');
-const APP_KEY = extra.appKey ?? '';
+// Set in app/.env (gitignored); see .env.example.
+export const API_BASE = (process.env.EXPO_PUBLIC_API_BASE ?? 'http://localhost:8788').replace(/\/$/, '');
+const APP_KEY = process.env.EXPO_PUBLIC_APP_KEY ?? '';
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, { headers: { 'X-App-Key': APP_KEY } });
