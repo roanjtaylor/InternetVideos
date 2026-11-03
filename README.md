@@ -18,7 +18,7 @@ No home feed, no recommendations, no Shorts, no comments, no autoplay-next.
    **Test users**. Add scope `.../auth/youtube` (read and write: the app saves
    to playlists).
 4. Credentials → Create credentials → OAuth client ID → type **iOS**, bundle
-   ID `com.roanjtaylor.tubelens`. Copy the client ID (iOS clients have no secret).
+   ID `com.roanjtaylor.internetvids`. Copy the client ID (iOS clients have no secret).
 5. Later, once it works: set the consent screen **Publishing status** to
    *In production* (leave it unverified). In *Testing* the sign-in expires
    every 7 days.

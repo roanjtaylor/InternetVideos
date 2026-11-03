@@ -15,7 +15,7 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.roanjtaylor.tubelens",
+      "bundleIdentifier": "com.roanjtaylor.internetvids",
       "infoPlist": {
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": true
@@ -45,7 +45,7 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "ccffa252-4d67-4a42-8f9c-991f30118390"
+        "projectId": "fbe7fb82-c7dc-4d8e-a33e-862f4c00973e"
       }
     },
     "owner": "roanjtaylor"
