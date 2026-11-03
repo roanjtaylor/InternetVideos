@@ -19,6 +19,8 @@ export type Video = {
   publishedAt: string;
   thumbnail: string | null;
   duration?: number; // seconds
+  /** Set when the video came from a playlist: the row to delete to remove it. */
+  playlistItemId?: string;
 };
 
 export type Page = { videos: Video[]; nextPage?: string | null };
@@ -33,28 +35,35 @@ export type Playlist = {
 
 export type Channel = { id: string; title: string; thumbnail: string | null };
 
+export type Me = { id: string; title: string; handle: string | null; thumbnail: string | null };
+
 // ---- Quota bookkeeping (resets midnight Pacific) --------------------------
 
-let quota = { day: '', used: 0 };
+export type QuotaKind = 'search' | 'writes' | 'reads';
+export type Quota = { day: string; used: number; search: number; writes: number; reads: number };
+
+const emptyQuota = (day: string): Quota => ({ day, used: 0, search: 0, writes: 0, reads: 0 });
+let quota: Quota = emptyQuota('');
 let quotaLoaded = false;
 
 function pacificDay(): string {
   return new Date(Date.now() - 8 * 3600 * 1000).toISOString().slice(0, 10);
 }
 
-async function chargeQuota(units: number) {
+async function chargeQuota(units: number, kind: QuotaKind) {
   if (!quotaLoaded) {
     quotaLoaded = true;
     try {
       const raw = await AsyncStorage.getItem('quota');
-      if (raw) quota = JSON.parse(raw);
+      if (raw) quota = { ...emptyQuota(''), ...JSON.parse(raw) };
     } catch {
       // ignore
     }
   }
   const day = pacificDay();
-  if (quota.day !== day) quota = { day, used: 0 };
+  if (quota.day !== day) quota = emptyQuota(day);
   quota.used += units;
+  quota[kind] += units;
   AsyncStorage.setItem('quota', JSON.stringify(quota)).catch(() => {});
 }
 
@@ -74,8 +83,14 @@ function url(endpoint: string, params: Params): string {
   return `${API}${endpoint}?${q}`;
 }
 
-async function ytFetch(method: 'GET' | 'POST', endpoint: string, params: Params, units: number, body?: unknown) {
-  await chargeQuota(units);
+async function ytFetch(
+  method: 'GET' | 'POST' | 'DELETE',
+  endpoint: string,
+  params: Params,
+  units: number,
+  body?: unknown,
+) {
+  await chargeQuota(units, method !== 'GET' ? 'writes' : units >= 100 ? 'search' : 'reads');
   const token = await getAccessToken();
   const res = await fetch(url(endpoint, params), {
     method,
@@ -86,6 +101,7 @@ async function ytFetch(method: 'GET' | 'POST', endpoint: string, params: Params,
     },
     body: body ? JSON.stringify(body) : undefined,
   });
+  if (res.status === 204) return {};
   const text = await res.text();
   let json: any = {};
   try {
@@ -103,6 +119,7 @@ async function ytFetch(method: 'GET' | 'POST', endpoint: string, params: Params,
 const ytGet = (endpoint: string, params: Params, units = 1) => ytFetch('GET', endpoint, params, units);
 const ytPost = (endpoint: string, params: Params, body: unknown, units = 50) =>
   ytFetch('POST', endpoint, params, units, body);
+const ytDelete = (endpoint: string, params: Params, units = 50) => ytFetch('DELETE', endpoint, params, units);
 
 async function ytGetAll(endpoint: string, params: Params, maxPages = 10): Promise<any[]> {
   const items: any[] = [];
@@ -149,6 +166,7 @@ function videoFromPlaylistItem(item: any): Video {
     channelTitle: sn.videoOwnerChannelTitle ?? sn.channelTitle,
     publishedAt: item.contentDetails?.videoPublishedAt ?? sn.publishedAt,
     thumbnail: bestThumb(sn),
+    playlistItemId: item.id,
   };
 }
 
@@ -342,7 +360,24 @@ export async function searchVideos(query: string): Promise<Video[]> {
   return enrich(videos, true);
 }
 
+/** The signed-in user's own channel: name, handle and avatar. 1 unit. */
+export async function myChannel(): Promise<Me> {
+  const resp = await ytGet('channels', { part: 'snippet', mine: 'true' });
+  const c = resp.items?.[0];
+  if (!c) throw new Error('This Google account has no YouTube channel.');
+  return {
+    id: c.id,
+    title: c.snippet?.title ?? '',
+    handle: c.snippet?.customUrl ?? null,
+    thumbnail: c.snippet?.thumbnails?.high?.url ?? c.snippet?.thumbnails?.default?.url ?? null,
+  };
+}
+
 // ---- Writes (50 units each) ------------------------------------------------
+
+export async function removeFromPlaylist(playlistItemId: string): Promise<void> {
+  await ytDelete('playlistItems', { id: playlistItemId });
+}
 
 export async function addToPlaylist(playlistId: string, videoId: string): Promise<void> {
   await ytPost(

@@ -4,8 +4,9 @@
  */
 import { cached, clearCache } from './cache';
 import * as yt from './youtube';
+import type { Video } from './youtube';
 
-export type { Channel, Page, Playlist, Video } from './youtube';
+export type { Channel, Me, Page, Playlist, Quota, Video } from './youtube';
 
 const MIN = 60;
 
@@ -23,9 +24,18 @@ export const api = {
     videos: await cached(`q:${q.toLowerCase()}`, 60 * MIN, () => yt.searchVideos(q)),
   }),
 
+  me: async () => cached('me', 24 * 60 * MIN, yt.myChannel),
+
   /** Writes invalidate the playlist caches so the next view reflects them. */
   addToPlaylist: async (playlistId: string, videoId: string) => {
     await yt.addToPlaylist(playlistId, videoId);
+    await Promise.all([clearCache('playlists'), clearCache(`pl:${playlistId}`)]);
+  },
+  /** Liked videos (LL) has no playlist items to delete: un-liking removes it. */
+  removeFromPlaylist: async (playlistId: string, video: Video) => {
+    if (playlistId === 'LL') await yt.rateVideo(video.id, 'none');
+    else if (video.playlistItemId) await yt.removeFromPlaylist(video.playlistItemId);
+    else throw new Error('This video cannot be removed from here.');
     await Promise.all([clearCache('playlists'), clearCache(`pl:${playlistId}`)]);
   },
   createPlaylist: async (title: string) => {

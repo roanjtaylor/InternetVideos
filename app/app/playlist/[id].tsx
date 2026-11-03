@@ -10,7 +10,13 @@ export default function PlaylistScreen() {
   return (
     <>
       <Stack.Screen options={{ title: title ?? 'Playlist' }} />
-      <VideoList load={load} emptyText="This playlist is empty." />
+      <VideoList
+        load={load}
+        playlistId={id}
+        playlistTitle={title ?? 'playlist'}
+        queueTitle={title ?? 'Playlist'}
+        emptyText="This playlist is empty."
+      />
     </>
   );
 }

@@ -20,8 +20,11 @@ WebBrowser.maybeCompleteAuthSession();
 
 export const GOOGLE_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID ?? '';
 
-/** youtube (not youtube.readonly): the app saves to playlists and likes. */
-const SCOPES = ['https://www.googleapis.com/auth/youtube'];
+/**
+ * youtube (not youtube.readonly): the app saves to playlists and likes.
+ * openid/email/profile: the profile tab shows the Google account.
+ */
+const SCOPES = ['https://www.googleapis.com/auth/youtube', 'openid', 'email', 'profile'];
 
 const discovery: DiscoveryDocument = {
   authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
@@ -138,6 +141,23 @@ export async function signOut(): Promise<void> {
     }
   }
   await saveTokens(null);
+}
+
+export type GoogleAccount = { name: string | null; email: string | null; picture: string | null };
+
+/**
+ * The Google account behind the token. Tokens issued before the profile
+ * scopes were added get a 401/403 here; the caller treats null as "sign out
+ * and in again to see this".
+ */
+export async function googleAccount(): Promise<GoogleAccount | null> {
+  const token = await getAccessToken();
+  const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) return null;
+  const j = await res.json();
+  return { name: j.name ?? null, email: j.email ?? null, picture: j.picture ?? null };
 }
 
 /** { ready, signedIn } for the auth gate in the root layout. */

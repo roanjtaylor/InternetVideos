@@ -1,16 +1,17 @@
-import FontAwesome from '@expo/vector-icons/FontAwesome';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, TextInput, useColorScheme } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { Text, View } from '@/components/Themed';
+import { Skeleton } from '@/components/Skeleton';
 import { api, Playlist } from '@/lib/api';
+import { useTheme } from '@/lib/theme';
 
-/** "Save to…" sheet for one video: like it, add to a playlist, or make a new one. */
+/** "Save video to…" sheet: like it, add to a playlist, or make a new one. */
 export default function SaveScreen() {
   const { id, title } = useLocalSearchParams<{ id: string; title?: string }>();
   const router = useRouter();
-  const scheme = useColorScheme();
+  const t = useTheme();
   const [playlists, setPlaylists] = useState<Playlist[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null); // playlist id in flight
@@ -46,67 +47,69 @@ export default function SaveScreen() {
   };
 
   const createAndAdd = async () => {
-    const t = newTitle.trim();
-    if (!t) return;
+    const name = newTitle.trim();
+    if (!name) return;
     await act(
       'new',
       async () => {
-        const p = await api.createPlaylist(t);
+        const p = await api.createPlaylist(name);
         await api.addToPlaylist(p.id, id);
       },
-      `Created "${t}" and saved`,
+      `Created "${name}" and saved`,
     );
   };
 
-  const dark = scheme === 'dark';
-  const subColor = dark ? '#aaa' : '#606060';
-
   return (
-    <View style={{ flex: 1 }}>
-      <Stack.Screen options={{ title: 'Save to…', presentation: 'modal' }} />
-      <Text style={[styles.videoTitle, { color: subColor }]} numberOfLines={2}>
+    <View style={{ flex: 1, backgroundColor: t.background }}>
+      <Stack.Screen options={{ title: 'Save video to…', presentation: 'modal' }} />
+      <Text style={[styles.videoTitle, { color: t.secondary }]} numberOfLines={2}>
         {title}
       </Text>
 
       <Pressable
         onPress={() => act('like', () => api.like(id), 'Liked')}
         disabled={!!busy}
-        style={({ pressed }) => [styles.row, pressed && { opacity: 0.6 }]}>
-        <FontAwesome name="thumbs-o-up" size={20} color="#2f95dc" style={styles.icon} />
-        <Text style={styles.rowText}>Like</Text>
-        {busy === 'like' && <ActivityIndicator />}
+        style={({ pressed }) => [styles.row, pressed && { backgroundColor: t.surface }]}>
+        <Ionicons name="thumbs-up-outline" size={24} color={t.text} style={styles.icon} />
+        <Text style={[styles.rowText, { color: t.text }]}>Liked videos</Text>
+        {busy === 'like' && <ActivityIndicator color={t.secondary} />}
       </Pressable>
 
       <View style={styles.row}>
-        <FontAwesome name="plus" size={20} color="#2f95dc" style={styles.icon} />
+        <Ionicons name="add" size={24} color={t.text} style={styles.icon} />
         <TextInput
           value={newTitle}
           onChangeText={setNewTitle}
           onSubmitEditing={createAndAdd}
-          placeholder="New playlist name"
-          placeholderTextColor="#888"
+          placeholder="New playlist"
+          placeholderTextColor={t.secondary}
           returnKeyType="done"
-          style={[styles.input, dark ? { backgroundColor: '#222', color: '#fff' } : { backgroundColor: '#eee', color: '#000' }]}
+          style={[styles.input, { backgroundColor: t.surface, color: t.text }]}
         />
         {busy === 'new' ? (
-          <ActivityIndicator />
+          <ActivityIndicator color={t.secondary} />
         ) : (
           <Pressable onPress={createAndAdd} disabled={!newTitle.trim()}>
-            <Text style={[styles.create, !newTitle.trim() && { opacity: 0.4 }]}>Create</Text>
+            <Text style={[styles.create, { color: t.link }, !newTitle.trim() && { opacity: 0.4 }]}>Create</Text>
           </Pressable>
         )}
       </View>
 
       {error ? (
         <View style={styles.center}>
-          <Text style={{ color: '#d33' }}>{error}</Text>
+          <Text style={{ color: t.danger }}>{error}</Text>
           <Pressable onPress={load}>
-            <Text style={{ color: '#2f95dc', marginTop: 12 }}>Retry</Text>
+            <Text style={{ color: t.link, marginTop: 12 }}>Retry</Text>
           </Pressable>
         </View>
       ) : !playlists ? (
-        <View style={styles.center}>
-          <ActivityIndicator />
+        <View>
+          {Array.from({ length: 5 }, (_, i) => (
+            <View key={i} style={styles.row}>
+              <Skeleton style={{ width: 24, height: 24, borderRadius: 4 }} />
+              <Skeleton style={{ height: 14, width: '55%' }} />
+            </View>
+          ))}
         </View>
       ) : (
         <FlatList
@@ -116,20 +119,20 @@ export default function SaveScreen() {
             <Pressable
               onPress={() => act(item.id, () => api.addToPlaylist(item.id, id), `Saved to "${item.title}"`)}
               disabled={!!busy}
-              style={({ pressed }) => [styles.row, pressed && { opacity: 0.6 }]}>
-              <FontAwesome name="list" size={18} color={subColor} style={styles.icon} />
+              style={({ pressed }) => [styles.row, pressed && { backgroundColor: t.surface }]}>
+              <Ionicons name="list" size={24} color={t.text} style={styles.icon} />
               <View style={{ flex: 1 }}>
-                <Text style={styles.rowText} numberOfLines={1}>
+                <Text style={[styles.rowText, { color: t.text }]} numberOfLines={1}>
                   {item.title}
                 </Text>
-                <Text style={{ color: subColor, fontSize: 12 }}>{item.itemCount} videos</Text>
+                <Text style={{ color: t.secondary, fontSize: 12 }}>{item.itemCount} videos</Text>
               </View>
-              {busy === item.id && <ActivityIndicator />}
+              {busy === item.id && <ActivityIndicator color={t.secondary} />}
             </Pressable>
           )}
           ListEmptyComponent={
             <View style={styles.center}>
-              <Text style={{ color: subColor }}>No playlists yet. Create one above.</Text>
+              <Text style={{ color: t.secondary }}>No playlists yet. Create one above.</Text>
             </View>
           }
         />
@@ -140,10 +143,10 @@ export default function SaveScreen() {
 
 const styles = StyleSheet.create({
   videoTitle: { fontSize: 13, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4 },
-  row: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, gap: 12 },
-  icon: { width: 24, textAlign: 'center' },
+  row: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, gap: 16 },
+  icon: { width: 28, textAlign: 'center' },
   rowText: { fontSize: 16, flex: 1 },
-  input: { flex: 1, padding: 10, borderRadius: 8, fontSize: 15 },
-  create: { color: '#2f95dc', fontSize: 16, fontWeight: '600' },
+  input: { flex: 1, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 8, fontSize: 15 },
+  create: { fontSize: 15, fontWeight: '600' },
   center: { padding: 24, alignItems: 'center' },
 });

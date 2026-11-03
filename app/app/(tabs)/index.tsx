@@ -1,35 +1,26 @@
-import FontAwesome from '@expo/vector-icons/FontAwesome';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  Image,
-  Pressable,
-  RefreshControl,
-  StyleSheet,
-  useColorScheme,
-} from 'react-native';
+import { FlatList, Image, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 
-import { Text, View } from '@/components/Themed';
-import { api, Channel } from '@/lib/api';
-import { signOut } from '@/lib/auth';
+import { Skeleton } from '@/components/Skeleton';
+import { api, Playlist, timeAgo } from '@/lib/api';
+import { useLoadingBar } from '@/lib/loading';
+import { useTheme } from '@/lib/theme';
 
-const COLUMNS = 3;
-
-/** Landing view: who you follow. Pick everyone's latest, or one channel. */
-export default function SubscriptionsScreen() {
+/** Home: your playlists, newest addition first. Liked videos is one of them. */
+export default function PlaylistsScreen() {
   const router = useRouter();
-  const scheme = useColorScheme();
-  const [channels, setChannels] = useState<Channel[] | null>(null);
+  const t = useTheme();
+  const [playlists, setPlaylists] = useState<Playlist[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  useLoadingBar(playlists === null && !error);
 
   const load = useCallback(async () => {
     setError(null);
     try {
-      setChannels((await api.subscriptions()).channels);
+      setPlaylists((await api.playlists()).playlists);
     } catch (e: any) {
       setError(e.message ?? String(e));
     }
@@ -42,86 +33,69 @@ export default function SubscriptionsScreen() {
   if (error)
     return (
       <View style={styles.center}>
-        <Text style={{ color: '#d33' }}>{error}</Text>
-        <Pressable onPress={load}>
-          <Text style={{ color: '#2f95dc', marginTop: 12 }}>Retry</Text>
+        <Text style={{ color: t.danger, textAlign: 'center' }}>{error}</Text>
+        <Pressable onPress={load} style={[styles.retryBtn, { backgroundColor: t.text }]}>
+          <Text style={{ color: t.background, fontWeight: '600' }}>Retry</Text>
         </Pressable>
       </View>
     );
-  if (!channels)
+  if (!playlists)
     return (
-      <View style={styles.center}>
-        <ActivityIndicator />
+      <View style={{ paddingTop: 4 }}>
+        {Array.from({ length: 7 }, (_, i) => (
+          <View key={i} style={styles.row}>
+            <Skeleton style={styles.thumb} />
+            <View style={{ flex: 1, gap: 8, paddingTop: 4 }}>
+              <Skeleton style={{ height: 14, width: '70%' }} />
+              <Skeleton style={{ height: 12, width: '40%' }} />
+            </View>
+          </View>
+        ))}
       </View>
     );
-
-  const subColor = scheme === 'dark' ? '#aaa' : '#606060';
-  const divider = scheme === 'dark' ? '#333' : '#e5e5e5';
 
   return (
     <FlatList
-      data={channels}
-      numColumns={COLUMNS}
-      keyExtractor={(c) => c.id}
-      ListHeaderComponent={
-        <Pressable
-          onPress={() => router.push('/feed')}
-          style={({ pressed }) => [styles.allRow, { borderBottomColor: divider }, pressed && { opacity: 0.6 }]}>
-          <View style={styles.allIcon}>
-            <FontAwesome name="newspaper-o" size={22} color="#fff" />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.allTitle}>Latest from everyone</Text>
-            <Text style={[styles.sub, { color: subColor }]}>
-              Newest uploads across {channels.length} channels
-            </Text>
-          </View>
-          <FontAwesome name="chevron-right" size={14} color={subColor} />
-        </Pressable>
-      }
+      data={playlists}
+      keyExtractor={(p) => p.id}
+      contentContainerStyle={{ paddingBottom: 80 }}
       renderItem={({ item }) => (
         <Pressable
-          onPress={() =>
-            router.push({ pathname: '/channel/[id]', params: { id: item.id, title: item.title } })
-          }
-          style={({ pressed }) => [styles.cell, pressed && { opacity: 0.6 }]}>
-          {item.thumbnail ? (
-            <Image source={{ uri: item.thumbnail }} style={styles.avatar} />
-          ) : (
-            <View style={[styles.avatar, { backgroundColor: '#333' }]} />
-          )}
-          <Text style={styles.name} numberOfLines={2}>
-            {item.title}
-          </Text>
+          onPress={() => router.push({ pathname: '/playlist/[id]', params: { id: item.id, title: item.title } })}
+          style={({ pressed }) => [styles.row, pressed && { backgroundColor: t.surface }]}>
+          <View style={styles.thumbWrap}>
+            {item.thumbnail ? (
+              <Image source={{ uri: item.thumbnail }} style={styles.thumb} />
+            ) : (
+              <View style={[styles.thumb, { backgroundColor: t.surfaceHigh }]} />
+            )}
+            <View style={styles.countBadge}>
+              <Ionicons name={item.id === 'LL' ? 'thumbs-up' : 'list'} size={12} color="#fff" />
+              <Text style={styles.countText}>{item.itemCount}</Text>
+            </View>
+          </View>
+          <View style={{ flex: 1, justifyContent: 'center' }}>
+            <Text style={[styles.title, { color: t.text }]} numberOfLines={2}>
+              {item.title}
+            </Text>
+            <Text style={[styles.sub, { color: t.secondary }]}>
+              {item.id === 'LL' ? 'Private' : 'Playlist'}
+              {item.lastAdded ? ` · updated ${timeAgo(item.lastAdded)}` : ''}
+            </Text>
+          </View>
         </Pressable>
       )}
       ListEmptyComponent={
         <View style={styles.center}>
-          <Text>No subscriptions yet. Subscribe in YouTube and pull to refresh.</Text>
-        </View>
-      }
-      ListFooterComponent={
-        <View style={styles.footer}>
-          <Text style={[styles.sub, { color: subColor }]}>
-            API quota today: {api.quota().used} / {api.quota().limit}
-          </Text>
-          <Pressable
-            onPress={() =>
-              Alert.alert('Sign out?', 'You can sign back in any time.', [
-                { text: 'Cancel', style: 'cancel' },
-                { text: 'Sign out', style: 'destructive', onPress: () => signOut() },
-              ])
-            }>
-            <Text style={styles.signOut}>Sign out</Text>
-          </Pressable>
+          <Text style={{ color: t.secondary }}>No playlists yet. Save a video to create one.</Text>
         </View>
       }
       refreshControl={
         <RefreshControl
           refreshing={refreshing}
+          tintColor={t.secondary}
           onRefresh={async () => {
             setRefreshing(true);
-            await api.refresh();
             await load();
             setRefreshing(false);
           }}
@@ -132,28 +106,25 @@ export default function SubscriptionsScreen() {
 }
 
 const styles = StyleSheet.create({
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  allRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    padding: 16,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    marginBottom: 8,
-  },
-  allIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#2f95dc',
+  row: { flexDirection: 'row', paddingHorizontal: 12, paddingVertical: 8, gap: 12 },
+  thumbWrap: { width: 160, height: 90 },
+  thumb: { width: 160, height: 90, borderRadius: 8 },
+  countBadge: {
+    position: 'absolute',
+    right: 0,
+    bottom: 0,
+    top: 0,
+    width: 56,
+    borderTopRightRadius: 8,
+    borderBottomRightRadius: 8,
+    backgroundColor: 'rgba(0,0,0,0.7)',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 2,
   },
-  allTitle: { fontSize: 16, fontWeight: '600' },
-  sub: { fontSize: 13, marginTop: 2 },
-  cell: { flex: 1 / COLUMNS, alignItems: 'center', paddingVertical: 12, paddingHorizontal: 6 },
-  avatar: { width: 72, height: 72, borderRadius: 36 },
-  name: { fontSize: 13, textAlign: 'center', marginTop: 8 },
-  footer: { alignItems: 'center', padding: 24, gap: 8 },
-  signOut: { color: '#d33', fontSize: 14 },
+  countText: { color: '#fff', fontSize: 12, fontWeight: '600' },
+  title: { fontSize: 15, fontWeight: '500', lineHeight: 20 },
+  sub: { fontSize: 12, marginTop: 4 },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12 },
+  retryBtn: { paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20 },
 });
