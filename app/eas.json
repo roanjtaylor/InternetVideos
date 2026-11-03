@@ -3,17 +3,19 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal",
-      "ios": { "simulator": false }
+      "distribution": "internal"
     },
     "preview": {
       "distribution": "internal"
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "ios": { "distribution": "store" }
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "ios": { "appleId": "roanjtaylor@gmail.com", "appleTeamId": "KZH548TRAQ" }
+    }
   }
 }
