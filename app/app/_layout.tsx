@@ -13,6 +13,7 @@ import { Player } from '@/components/Player';
 import { useColorScheme } from '@/components/useColorScheme';
 import Colors from '@/constants/Colors';
 import { useAuth } from '@/lib/auth';
+import { lockPortrait } from '@/lib/orientation';
 import { closePlayer } from '@/lib/player';
 
 export { ErrorBoundary } from 'expo-router';
@@ -44,6 +45,11 @@ export default function RootLayout() {
   useEffect(() => {
     if (error) throw error;
   }, [error]);
+
+  // Portrait everywhere; the player lifts this while a video is open.
+  useEffect(() => {
+    lockPortrait();
+  }, []);
 
   useEffect(() => {
     if (loaded && auth.ready) SplashScreen.hideAsync();
@@ -86,6 +92,7 @@ export default function RootLayout() {
           <Stack.Screen name="playlist/[id]" />
           <Stack.Screen name="channel/[id]" />
           <Stack.Screen name="channels" options={{ title: 'All subscriptions' }} />
+          <Stack.Screen name="history" options={{ title: 'History' }} />
         </Stack>
         <LoadingBar />
         <Player />

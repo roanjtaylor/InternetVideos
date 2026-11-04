@@ -18,12 +18,19 @@ export type Video = {
   channelTitle: string;
   publishedAt: string;
   thumbnail: string | null;
+  description?: string;
   duration?: number; // seconds
+  viewCount?: number;
+  likeCount?: number;
   /** Set when the video came from a playlist: the row to delete to remove it. */
   playlistItemId?: string;
+  /** Set when the video came from a playlist: when it was added there. */
+  addedAt?: string;
 };
 
 export type Page = { videos: Video[]; nextPage?: string | null };
+
+export type PlaylistPrivacy = 'private' | 'unlisted' | 'public';
 
 export type Playlist = {
   id: string;
@@ -31,9 +38,21 @@ export type Playlist = {
   itemCount: number;
   thumbnail: string | null;
   lastAdded?: string | null; // ISO date of the newest addition
+  createdAt?: string | null; // ISO date the playlist was made
+  privacy: PlaylistPrivacy;
 };
 
-export type Channel = { id: string; title: string; thumbnail: string | null };
+export type Channel = {
+  id: string;
+  title: string;
+  thumbnail: string | null;
+  /** The subscriptions.list row id, needed to unsubscribe. */
+  subscriptionId?: string;
+};
+
+export type ChannelInfo = Channel & { subscriberCount: number | null };
+
+export type Rating = 'like' | 'dislike' | 'none';
 
 export type Me = { id: string; title: string; handle: string | null; thumbnail: string | null };
 
@@ -166,7 +185,9 @@ function videoFromPlaylistItem(item: any): Video {
     channelTitle: sn.videoOwnerChannelTitle ?? sn.channelTitle,
     publishedAt: item.contentDetails?.videoPublishedAt ?? sn.publishedAt,
     thumbnail: bestThumb(sn),
+    description: sn.description || undefined,
     playlistItemId: item.id,
+    addedAt: sn.publishedAt,
   };
 }
 
@@ -179,6 +200,7 @@ function videoFromSearchItem(item: any): Video {
     channelTitle: sn.channelTitle,
     publishedAt: sn.publishedAt,
     thumbnail: bestThumb(sn),
+    description: sn.description || undefined,
   };
 }
 
@@ -187,6 +209,12 @@ export function parseIsoDuration(s?: string): number {
   const m = /PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/.exec(s);
   if (!m) return 0;
   return Number(m[1] ?? 0) * 3600 + Number(m[2] ?? 0) * 60 + Number(m[3] ?? 0);
+}
+
+function applyStats(v: Video, st: any) {
+  if (!st) return;
+  if (st.viewCount !== undefined) v.viewCount = Number(st.viewCount);
+  if (st.likeCount !== undefined) v.likeCount = Number(st.likeCount);
 }
 
 const sortNewest = (videos: Video[]) =>
@@ -212,7 +240,7 @@ async function enrich(videos: Video[], dropShorts: boolean): Promise<Video[]> {
   const batches: string[][] = [];
   for (let i = 0; i < needLookup.length; i += 50) batches.push(needLookup.slice(i, i + 50));
   const results = await pool(batches, 4, (batch) =>
-    ytGet('videos', { part: 'contentDetails,player', id: batch.join(','), maxWidth: 320 }),
+    ytGet('videos', { part: 'contentDetails,player,statistics', id: batch.join(','), maxWidth: 320 }),
   );
   for (const resp of results) {
     if (resp instanceof Error) continue;
@@ -220,6 +248,7 @@ async function enrich(videos: Video[], dropShorts: boolean): Promise<Video[]> {
       const v = byId.get(it.id);
       if (!v) continue;
       v.duration = parseIsoDuration(it.contentDetails?.duration);
+      applyStats(v, it.statistics);
       const short = judgeShort({
         title: v.title,
         duration: v.duration,
@@ -235,19 +264,60 @@ async function enrich(videos: Video[], dropShorts: boolean): Promise<Video[]> {
 
 // ---- Queries ---------------------------------------------------------------
 
-/** Subscribed channels, alphabetical. 1 unit per 50. */
+/**
+ * Subscribed channels in YouTube's relevance order: the channels you watch
+ * most come first, the same ranking the official app's strip uses. 1 unit per 50.
+ */
 export async function mySubscriptions(): Promise<Channel[]> {
   const subs = await ytGetAll('subscriptions', {
     part: 'snippet',
     mine: 'true',
-    order: 'alphabetical',
+    order: 'relevance',
     maxResults: 50,
   });
   return subs.map((s) => ({
     id: s.snippet?.resourceId?.channelId,
     title: s.snippet?.title,
     thumbnail: s.snippet?.thumbnails?.medium?.url ?? s.snippet?.thumbnails?.default?.url ?? null,
+    subscriptionId: s.id,
   }));
+}
+
+/** A channel's avatar and subscriber count. 1 unit. */
+export async function channelInfo(channelId: string): Promise<ChannelInfo> {
+  const resp = await ytGet('channels', { part: 'snippet,statistics', id: channelId });
+  const c = resp.items?.[0];
+  if (!c) throw new Error('Channel not found.');
+  return {
+    id: c.id,
+    title: c.snippet?.title ?? '',
+    thumbnail: c.snippet?.thumbnails?.medium?.url ?? c.snippet?.thumbnails?.default?.url ?? null,
+    subscriberCount: c.statistics?.hiddenSubscriberCount ? null : Number(c.statistics?.subscriberCount ?? 0),
+  };
+}
+
+/** Everything the player shows for one video: description, duration, views and likes. 1 unit. */
+export async function videoDetails(videoId: string): Promise<Partial<Video>> {
+  const resp = await ytGet('videos', { part: 'snippet,contentDetails,statistics', id: videoId });
+  const it = resp.items?.[0];
+  if (!it) throw new Error('Video not found.');
+  const v: Partial<Video> = {
+    id: it.id,
+    title: it.snippet?.title,
+    channelId: it.snippet?.channelId,
+    channelTitle: it.snippet?.channelTitle,
+    publishedAt: it.snippet?.publishedAt,
+    description: it.snippet?.description || undefined,
+    duration: parseIsoDuration(it.contentDetails?.duration),
+  };
+  applyStats(v as Video, it.statistics);
+  return v;
+}
+
+/** Your rating of a video. 1 unit. */
+export async function getRating(videoId: string): Promise<Rating> {
+  const resp = await ytGet('videos/getRating', { id: videoId });
+  return (resp.items?.[0]?.rating as Rating) ?? 'none';
 }
 
 /** A channel's uploads playlist is its id with UC swapped for UU. */
@@ -329,14 +399,17 @@ async function likedVideosPlaylist(): Promise<Playlist> {
     itemCount: resp.pageInfo?.totalResults ?? 0,
     thumbnail: first ? bestThumb(first.snippet) : null,
     lastAdded: first?.snippet?.publishedAt ?? null,
+    createdAt: null,
+    privacy: 'private',
   };
 }
+
 
 /** Liked videos plus your own playlists, newest addition first. */
 export async function myPlaylists(): Promise<Playlist[]> {
   const [liked, own] = await Promise.all([
     likedVideosPlaylist().catch(() => null),
-    ytGetAll('playlists', { part: 'snippet,contentDetails', mine: 'true', maxResults: 50 }),
+    ytGetAll('playlists', { part: 'snippet,contentDetails,status', mine: 'true', maxResults: 50 }),
   ]);
   const playlists: Playlist[] = own.map((p) => ({
     id: p.id,
@@ -344,6 +417,8 @@ export async function myPlaylists(): Promise<Playlist[]> {
     itemCount: p.contentDetails?.itemCount ?? 0,
     thumbnail: bestThumb(p.snippet),
     lastAdded: p.snippet?.publishedAt ?? null,
+    createdAt: p.snippet?.publishedAt ?? null,
+    privacy: (p.status?.privacyStatus as PlaylistPrivacy) ?? 'private',
   }));
   const dates = await pool(playlists, 6, (p) => playlistLastAdded(p.id, 5));
   dates.forEach((d, i) => {
@@ -398,4 +473,18 @@ export async function createPlaylist(title: string, privacy: 'private' | 'unlist
 
 export async function rateVideo(videoId: string, rating: 'like' | 'none'): Promise<void> {
   await ytPost('videos/rate', { id: videoId, rating }, undefined, 50);
+}
+
+/** Returns the new subscription's row id. */
+export async function subscribe(channelId: string): Promise<string> {
+  const resp = await ytPost(
+    'subscriptions',
+    { part: 'snippet' },
+    { snippet: { resourceId: { kind: 'youtube#channel', channelId } } },
+  );
+  return resp.id as string;
+}
+
+export async function unsubscribe(subscriptionId: string): Promise<void> {
+  await ytDelete('subscriptions', { id: subscriptionId });
 }

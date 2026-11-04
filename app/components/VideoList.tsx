@@ -17,6 +17,7 @@ import {
 import { ActionSheet, SheetAction } from '@/components/ActionSheet';
 import { ListSkeleton } from '@/components/Skeleton';
 import { api, formatDuration, Page, timeAgo, Video } from '@/lib/api';
+import { useWatchHistory, watchedFraction } from '@/lib/history';
 import { useLoadingBar } from '@/lib/loading';
 import { openVideo } from '@/lib/player';
 import { useTheme } from '@/lib/theme';
@@ -31,11 +32,7 @@ type RowProps = {
   /** When set, the menu offers "Remove from playlist". */
   playlistId?: string;
   playlistTitle?: string;
-  queue?: Video[];
-  queueTitle?: string | null;
   onRemoved?: (video: Video) => void;
-  /** Highlighted (the one currently playing in an "Up next" list). */
-  active?: boolean;
 };
 
 export function VideoRow({
@@ -44,14 +41,13 @@ export function VideoRow({
   avatar,
   playlistId,
   playlistTitle,
-  queue,
-  queueTitle,
   onRemoved,
-  active,
 }: RowProps) {
   const router = useRouter();
   const t = useTheme();
   const [menu, setMenu] = useState(false);
+  const history = useWatchHistory();
+  const watched = watchedFraction(video.id, history);
 
   const remove = () => {
     if (!playlistId) return;
@@ -122,12 +118,18 @@ export function VideoRow({
     );
 
   const duration = !!video.duration && <Text style={styles.duration}>{formatDuration(video.duration)}</Text>;
+  // YouTube's red progress bar along the bottom of a thumbnail you have started.
+  const progress = watched !== null && watched > 0 && (
+    <View style={styles.progressTrack}>
+      <View style={[styles.progressFill, { width: `${Math.round(watched * 100)}%`, backgroundColor: t.red }]} />
+    </View>
+  );
 
   const sheet = (
     <ActionSheet visible={menu} title={video.title} actions={actions} onClose={() => setMenu(false)} />
   );
 
-  const open = () => openVideo(video, queue, queueTitle ?? null);
+  const open = () => openVideo(video);
 
   if (layout === 'card') {
     return (
@@ -136,6 +138,7 @@ export function VideoRow({
           <View style={styles.cardThumbWrap}>
             {thumb(styles.cardThumb)}
             {duration}
+            {progress}
           </View>
         </Pressable>
         <View style={styles.cardMeta}>
@@ -160,10 +163,11 @@ export function VideoRow({
   }
 
   return (
-    <View style={[styles.row, active && { backgroundColor: t.surface }]}>
+    <View style={styles.row}>
       <Pressable onPress={open} style={({ pressed }) => [styles.thumbWrap, pressed && { opacity: 0.8 }]}>
         {thumb(styles.thumb)}
         {duration}
+        {progress}
       </Pressable>
       <Pressable onPress={open} style={styles.meta}>
         <Text style={[styles.title, { color: t.text }]} numberOfLines={2}>
@@ -190,11 +194,12 @@ type Props = {
   avatars?: Record<string, string | null>;
   playlistId?: string;
   playlistTitle?: string;
-  queueTitle?: string | null;
   header?: React.ReactElement | null;
   /** Called with the full list whenever it changes (the subscriptions tab orders its channels by it). */
   onVideos?: (videos: Video[]) => void;
   filter?: (v: Video) => boolean;
+  /** Reorders the loaded videos (only what has been fetched so far). */
+  sort?: (a: Video, b: Video) => number;
 };
 
 function asPage(r: Video[] | Page): Page {
@@ -208,10 +213,10 @@ export function VideoList({
   avatars,
   playlistId,
   playlistTitle,
-  queueTitle,
   header,
   onVideos,
   filter,
+  sort,
 }: Props) {
   const t = useTheme();
   const [videos, setVideos] = useState<Video[] | null>(null);
@@ -282,7 +287,8 @@ export function VideoList({
       </View>
     );
   }
-  const shown = filter ? videos.filter(filter) : videos;
+  const filteredVideos = filter ? videos.filter(filter) : videos;
+  const shown = sort ? [...filteredVideos].sort(sort) : filteredVideos;
   return (
     <FlatList
       data={shown}
@@ -294,8 +300,6 @@ export function VideoList({
           avatar={avatars?.[item.channelId]}
           playlistId={playlistId}
           playlistTitle={playlistTitle}
-          queue={shown}
-          queueTitle={queueTitle}
           onRemoved={(v) => setVideos((prev) => (prev ?? []).filter((x) => x !== v))}
         />
       )}
@@ -352,6 +356,18 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     overflow: 'hidden',
   },
+  progressTrack: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 3,
+    backgroundColor: 'rgba(255,255,255,0.35)',
+    borderBottomLeftRadius: 8,
+    borderBottomRightRadius: 8,
+    overflow: 'hidden',
+  },
+  progressFill: { height: 3 },
   meta: { flex: 1, paddingTop: 2 },
   title: { fontSize: 14, fontWeight: '500', lineHeight: 20 },
   sub: { fontSize: 12, marginTop: 4, lineHeight: 16 },

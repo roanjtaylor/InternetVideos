@@ -9,11 +9,15 @@ export function latestByChannel(videos: Video[]): Record<string, string> {
   return out;
 }
 
-export type ChannelSort = 'activity' | 'alpha';
+export type ChannelSort = 'relevance' | 'activity' | 'alpha';
 
-/** Channels by newest activity (unknown activity last, then A to Z) or A to Z. */
+/**
+ * Channels in YouTube's relevance order (as fetched: most watched first), by
+ * newest activity (unknown activity last, then A to Z), or A to Z.
+ */
 export function sortChannels(channels: Channel[], sort: ChannelSort, activity: Record<string, string>): Channel[] {
   const alpha = (a: Channel, b: Channel) => a.title.localeCompare(b.title, undefined, { sensitivity: 'base' });
+  if (sort === 'relevance') return channels;
   if (sort === 'alpha') return [...channels].sort(alpha);
   return [...channels].sort((a, b) => {
     const da = activity[a.id] ?? '';

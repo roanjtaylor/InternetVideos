@@ -10,7 +10,7 @@ export default function ChannelScreen() {
   return (
     <>
       <Stack.Screen options={{ title: title ?? 'Channel' }} />
-      <VideoList load={load} queueTitle={title ?? 'Channel'} emptyText="No uploads yet." />
+      <VideoList load={load} emptyText="No uploads yet." />
     </>
   );
 }

@@ -1,21 +1,48 @@
 {
-  "cli": { "version": ">= 24.0.0", "appVersionSource": "remote" },
+  "cli": {
+    "version": ">= 24.0.0",
+    "appVersionSource": "remote"
+  },
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "APP_VARIANT": "development",
+        "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "886025137843-p0etrcr25o877oh5uhhc99ui3jc2kpov.apps.googleusercontent.com"
+      }
     },
     "preview": {
       "distribution": "internal"
     },
     "production": {
       "autoIncrement": true,
-      "ios": { "distribution": "store" }
+      "ios": {
+        "distribution": "store"
+      }
+    },
+    "development-testflight": {
+      "developmentClient": true,
+      "distribution": "store",
+      "autoIncrement": true,
+      "env": {
+        "APP_VARIANT": "development",
+        "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "886025137843-p0etrcr25o877oh5uhhc99ui3jc2kpov.apps.googleusercontent.com"
+      }
     }
   },
   "submit": {
     "production": {
-      "ios": { "appleId": "roanjtaylor@gmail.com", "appleTeamId": "KZH548TRAQ" }
+      "ios": {
+        "appleId": "roanjtaylor@gmail.com",
+        "appleTeamId": "KZH548TRAQ"
+      }
+    },
+    "development-testflight": {
+      "ios": {
+        "appleId": "roanjtaylor@gmail.com",
+        "appleTeamId": "KZH548TRAQ"
+      }
     }
   }
 }

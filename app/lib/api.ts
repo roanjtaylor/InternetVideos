@@ -6,7 +6,7 @@ import { cached, clearCache } from './cache';
 import * as yt from './youtube';
 import type { Video } from './youtube';
 
-export type { Channel, Me, Page, Playlist, Quota, Video } from './youtube';
+export type { Channel, ChannelInfo, Me, Page, Playlist, PlaylistPrivacy, Quota, Rating, Video } from './youtube';
 
 const MIN = 60;
 
@@ -25,6 +25,24 @@ export const api = {
   }),
 
   me: async () => cached('me', 24 * 60 * MIN, yt.myChannel),
+  video: (id: string) => cached(`v:${id}`, 30 * MIN, () => yt.videoDetails(id)),
+  channelInfo: (id: string) => cached(`chinfo:${id}`, 24 * 60 * MIN, () => yt.channelInfo(id)),
+  /** Not cached: the answer changes with every like. 1 unit. */
+  rating: (videoId: string) => yt.getRating(videoId),
+  /** The subscription row for a channel, from the cached list. Null when not subscribed. */
+  subscription: async (channelId: string): Promise<string | null> => {
+    const list = await cached('subscriptions', 30 * MIN, yt.mySubscriptions);
+    return list.find((c) => c.id === channelId)?.subscriptionId ?? null;
+  },
+  subscribe: async (channelId: string) => {
+    const id = await yt.subscribe(channelId);
+    await Promise.all([clearCache('subscriptions'), clearCache('feed')]);
+    return id;
+  },
+  unsubscribe: async (subscriptionId: string) => {
+    await yt.unsubscribe(subscriptionId);
+    await Promise.all([clearCache('subscriptions'), clearCache('feed')]);
+  },
 
   /** Writes invalidate the playlist caches so the next view reflects them. */
   addToPlaylist: async (playlistId: string, videoId: string) => {
@@ -47,6 +65,10 @@ export const api = {
     await yt.rateVideo(videoId, 'like');
     await Promise.all([clearCache('playlists'), clearCache('pl:LL')]);
   },
+  unlike: async (videoId: string) => {
+    await yt.rateVideo(videoId, 'none');
+    await Promise.all([clearCache('playlists'), clearCache('pl:LL')]);
+  },
 
   refresh: () => clearCache(),
   quota: yt.quotaStatus,
@@ -60,6 +82,29 @@ export function formatDuration(seconds?: number): string {
   return h > 0
     ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
     : `${m}:${String(s).padStart(2, '0')}`;
+}
+
+/** 1234 → "1.2K", 1200000 → "1.2M", like YouTube's counters. */
+export function formatCount(n?: number | null): string {
+  if (n === undefined || n === null) return '';
+  if (n < 1000) return String(n);
+  const units: [number, string][] = [
+    [1e9, 'B'],
+    [1e6, 'M'],
+    [1e3, 'K'],
+  ];
+  for (const [size, suffix] of units) {
+    if (n >= size) {
+      const v = n / size;
+      return `${v >= 10 ? Math.round(v) : Math.round(v * 10) / 10}${suffix}`;
+    }
+  }
+  return String(n);
+}
+
+/** "3 Nov 2026" for the player's date line. */
+export function shortDate(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 export function timeAgo(iso: string): string {

@@ -1,6 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import React, { useCallback, useEffect, useState } from 'react';
+import { useFocusEffect } from 'expo-router';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -17,6 +18,17 @@ export default function SearchScreen() {
   const [draft, setDraft] = useState('');
   const [query, setQuery] = useState('');
   const [recent, setRecent] = useState<string[]>([]);
+  const input = useRef<TextInput>(null);
+
+  // Tapping the tab is the request to search: raise the keyboard at once,
+  // unless results are already showing (coming back from a video).
+  useFocusEffect(
+    useCallback(() => {
+      if (query) return;
+      const id = setTimeout(() => input.current?.focus(), 50);
+      return () => clearTimeout(id);
+    }, [query]),
+  );
 
   useEffect(() => {
     AsyncStorage.getItem(RECENT_KEY)
@@ -52,6 +64,7 @@ export default function SearchScreen() {
         <View style={[styles.pill, { backgroundColor: t.surface }]}>
           <Ionicons name="search" size={18} color={t.secondary} />
           <TextInput
+            ref={input}
             value={draft}
             onChangeText={setDraft}
             onSubmitEditing={() => submit(draft)}
@@ -75,7 +88,7 @@ export default function SearchScreen() {
         </View>
       </View>
       {query ? (
-        <VideoList key={query} load={load} emptyText="No results." queueTitle={`Search: ${query}`} />
+        <VideoList key={query} load={load} emptyText="No results." />
       ) : (
         <View style={{ flex: 1 }}>
           {recent.map((q) => (

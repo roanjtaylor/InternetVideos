@@ -9,7 +9,7 @@ import { ChannelSort, latestByChannel, sortChannels } from '@/lib/channels';
 import { useLoadingBar } from '@/lib/loading';
 import { useTheme } from '@/lib/theme';
 
-const SORT_LABEL: Record<ChannelSort, string> = { activity: 'New activity', alpha: 'A to Z' };
+const SORT_LABEL: Record<ChannelSort, string> = { relevance: 'Most relevant', activity: 'New activity', alpha: 'A to Z' };
 
 /** Every subscription as a list, by new activity or A to Z. */
 export default function ChannelsScreen() {
@@ -17,7 +17,7 @@ export default function ChannelsScreen() {
   const t = useTheme();
   const [channels, setChannels] = useState<Channel[] | null>(null);
   const [activity, setActivity] = useState<Record<string, string>>({});
-  const [sort, setSort] = useState<ChannelSort>('activity');
+  const [sort, setSort] = useState<ChannelSort>('relevance');
   const [sortSheet, setSortSheet] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useLoadingBar(channels === null && !error);
@@ -91,6 +91,13 @@ export default function ChannelsScreen() {
         title="Sort by"
         onClose={() => setSortSheet(false)}
         actions={[
+          {
+            key: 'relevance',
+            label: 'Most relevant',
+            icon: 'star-outline',
+            selected: sort === 'relevance',
+            onPress: () => setSort('relevance'),
+          },
           {
             key: 'activity',
             label: 'New activity',

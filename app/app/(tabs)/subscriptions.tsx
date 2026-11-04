@@ -19,9 +19,9 @@ const FILTERS: { key: Filter; label: string }[] = [
 ];
 
 /**
- * Subscriptions, YouTube style: a strip of the channels you follow ordered
- * by newest activity with "All" at the end, filter chips, then the latest
- * uploads across every channel.
+ * Subscriptions, YouTube style: a strip of the channels you follow in
+ * YouTube's relevance order (most watched first) with "All" at the end,
+ * filter chips, then the latest uploads across every channel.
  */
 export default function SubscriptionsScreen() {
   const router = useRouter();
@@ -42,7 +42,8 @@ export default function SubscriptionsScreen() {
   const load = useCallback(async () => (await api.feed()).videos, []);
   const onVideos = useCallback((videos: Video[]) => setActivity(latestByChannel(videos)), []);
 
-  const ordered = useMemo(() => (channels ? sortChannels(channels, 'activity', activity) : null), [channels, activity]);
+  // YouTube's own ranking: the channels you watch most, first.
+  const ordered = useMemo(() => (channels ? sortChannels(channels, 'relevance', activity) : null), [channels, activity]);
   const avatars = useMemo(
     () => Object.fromEntries((channels ?? []).map((c) => [c.id, c.thumbnail])),
     [channels],
@@ -111,7 +112,6 @@ export default function SubscriptionsScreen() {
       header={header}
       onVideos={onVideos}
       filter={filterFn}
-      queueTitle="Subscriptions"
       emptyText={
         filter === 'all'
           ? 'No uploads from your subscriptions yet. Subscribe in YouTube and pull to refresh.'
