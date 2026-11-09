@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import React from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useTheme } from '@/lib/theme';
@@ -9,6 +9,8 @@ export type SheetAction = {
   key: string;
   label: string;
   icon: React.ComponentProps<typeof Ionicons>['name'];
+  /** Replaces the icon with a picture (a channel logo). */
+  image?: string | null;
   destructive?: boolean;
   selected?: boolean;
   onPress: () => void;
@@ -43,7 +45,11 @@ export function ActionSheet({ visible, title, actions, onClose }: Props) {
               setTimeout(a.onPress, 0);
             }}
             style={({ pressed }) => [styles.row, pressed && { backgroundColor: t.surface }]}>
-            <Ionicons name={a.icon} size={24} color={a.destructive ? t.danger : t.text} style={{ width: 32 }} />
+            {a.image ? (
+              <Image source={{ uri: a.image }} style={styles.image} />
+            ) : (
+              <Ionicons name={a.icon} size={24} color={a.destructive ? t.danger : t.text} style={{ width: 32 }} />
+            )}
             <Text style={[styles.label, { color: a.destructive ? t.danger : t.text }]}>{a.label}</Text>
             {a.selected && <Ionicons name="checkmark" size={22} color={t.text} />}
           </Pressable>
@@ -54,8 +60,18 @@ export function ActionSheet({ visible, title, actions, onClose }: Props) {
 }
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' },
-  sheet: { borderTopLeftRadius: 16, borderTopRightRadius: 16, paddingTop: 8 },
+  backdrop: { flex: 1 },
+  image: { width: 32, height: 32, borderRadius: 16 },
+  sheet: {
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    paddingTop: 8,
+    elevation: 16,
+    shadowColor: '#000',
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: -2 },
+  },
   grabber: { alignSelf: 'center', width: 36, height: 4, borderRadius: 2, opacity: 0.5, marginBottom: 8 },
   title: { fontSize: 13, paddingHorizontal: 20, paddingVertical: 8 },
   row: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14, gap: 16 },

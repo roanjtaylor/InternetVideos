@@ -11,7 +11,12 @@ export type { Channel, ChannelInfo, Me, Page, Playlist, PlaylistPrivacy, Quota, 
 const MIN = 60;
 
 export const api = {
-  feed: async () => ({ videos: await cached('feed', 15 * MIN, () => yt.subscriptionsFeed()) }),
+  /** Newest subscription uploads, 3 on the first page then 6 at a time. Discovery is free; each page costs ~1 unit. */
+  feed: async (page?: string | null) => {
+    const offset = Number(page ?? 0) || 0;
+    const index = await cached('feed:index', 15 * MIN, () => yt.subscriptionsIndex());
+    return cached(`feed:p${offset}`, 15 * MIN, () => yt.subscriptionsFeedPage(index, offset, offset === 0 ? 3 : 6));
+  },
   subscriptions: async () => ({ channels: await cached('subscriptions', 30 * MIN, yt.mySubscriptions) }),
   channel: (id: string, page?: string | null) =>
     cached(`ch:${id}:${page ?? ''}`, 5 * MIN, () =>
@@ -20,13 +25,23 @@ export const api = {
   playlists: async () => ({ playlists: await cached('playlists', 5 * MIN, yt.myPlaylists) }),
   playlist: (id: string, page?: string | null) =>
     cached(`pl:${id}:${page ?? ''}`, 5 * MIN, () => yt.playlistVideos(id, page)),
-  search: async (q: string) => ({
-    videos: await cached(`q:${q.toLowerCase()}`, 60 * MIN, () => yt.searchVideos(q)),
-  }),
+  search: (q: string, page?: string | null) =>
+    cached(`q:${q.toLowerCase()}:${page ?? ''}`, 60 * MIN, () => yt.searchVideos(q, page)),
+
+  /** YouTube's own search autocomplete. Free: not part of the Data API quota. */
+  suggestions: async (q: string): Promise<string[]> => {
+    const url = `https://suggestqueries-clients6.youtube.com/complete/search?client=youtube&ds=yt&hl=en&q=${encodeURIComponent(q)}`;
+    const text = await (await fetch(url)).text();
+    const start = text.indexOf('[');
+    const end = text.lastIndexOf(']');
+    if (start < 0 || end < 0) return [];
+    const data = JSON.parse(text.slice(start, end + 1));
+    return ((data[1] ?? []) as any[]).map((s) => String(Array.isArray(s) ? s[0] : s)).slice(0, 10);
+  },
 
   me: async () => cached('me', 24 * 60 * MIN, yt.myChannel),
   video: (id: string) => cached(`v:${id}`, 30 * MIN, () => yt.videoDetails(id)),
-  channelInfo: (id: string) => cached(`chinfo:${id}`, 24 * 60 * MIN, () => yt.channelInfo(id)),
+  channelInfo: (id: string) => cached(`chinfo2:${id}`, 24 * 60 * MIN, () => yt.channelInfo(id)),
   /** Not cached: the answer changes with every like. 1 unit. */
   rating: (videoId: string) => yt.getRating(videoId),
   /** The subscription row for a channel, from the cached list. Null when not subscribed. */
@@ -70,8 +85,14 @@ export const api = {
     await Promise.all([clearCache('playlists'), clearCache('pl:LL')]);
   },
 
+  dislike: async (videoId: string) => {
+    await yt.rateVideo(videoId, 'dislike');
+    await Promise.all([clearCache('playlists'), clearCache('pl:LL')]);
+  },
+
   refresh: () => clearCache(),
   quota: yt.quotaStatus,
+  quotaReady: yt.quotaReady,
 };
 
 export function formatDuration(seconds?: number): string {

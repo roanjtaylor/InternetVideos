@@ -1,11 +1,10 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
-import { FlatList, Image, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Animated, Easing, FlatList, Image, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 
 import { ActionSheet } from '@/components/ActionSheet';
-import { FilterButton, FilterSheet } from '@/components/FilterSheet';
 import { Skeleton } from '@/components/Skeleton';
 import { api, Playlist, PlaylistPrivacy, timeAgo } from '@/lib/api';
 import { useLoadingBar } from '@/lib/loading';
@@ -13,10 +12,7 @@ import { pinnedPlaylists, togglePin, usePins } from '@/lib/pins';
 import { useTheme } from '@/lib/theme';
 
 type Sort = 'updated' | 'created' | 'alpha' | 'count';
-type Privacy = 'all' | PlaylistPrivacy;
-type Filter = { sort: Sort; privacy: Privacy };
-
-const DEFAULT_FILTER: Filter = { sort: 'updated', privacy: 'all' };
+const DEFAULT_SORT: Sort = 'updated';
 const FILTER_KEY = 'playlist-filter';
 
 const SORTS: { key: Sort; label: string }[] = [
@@ -25,20 +21,12 @@ const SORTS: { key: Sort; label: string }[] = [
   { key: 'alpha', label: 'A to Z' },
   { key: 'count', label: 'Most videos' },
 ];
-const PRIVACIES: { key: Privacy; label: string }[] = [
-  { key: 'all', label: 'All' },
-  { key: 'private', label: 'Private' },
-  { key: 'unlisted', label: 'Unlisted' },
-  { key: 'public', label: 'Public' },
-];
-
 const PRIVACY_LABEL: Record<PlaylistPrivacy, string> = { private: 'Private', unlisted: 'Unlisted', public: 'Public' };
 
-function arrange(playlists: Playlist[], f: Filter): Playlist[] {
-  const shown = f.privacy === 'all' ? playlists : playlists.filter((p) => p.privacy === f.privacy);
+function arrange(shown: Playlist[], sort: Sort): Playlist[] {
   const byDate = (pick: (p: Playlist) => string | null | undefined) => (a: Playlist, b: Playlist) =>
     (pick(b) ?? '').localeCompare(pick(a) ?? '');
-  switch (f.sort) {
+  switch (sort) {
     case 'alpha':
       return [...shown].sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: 'base' }));
     case 'count':
@@ -51,8 +39,8 @@ function arrange(playlists: Playlist[], f: Filter): Playlist[] {
 }
 
 /**
- * Playlists: your own plus Liked videos, with a sort and privacy filter in
- * the header. The kebab on a row pins it to Home.
+ * Playlists: your own plus Liked videos, with a sort dropdown beside the
+ * title. The kebab on a row pins it to Home.
  */
 export default function PlaylistsScreen() {
   const router = useRouter();
@@ -61,32 +49,75 @@ export default function PlaylistsScreen() {
   const [playlists, setPlaylists] = useState<Playlist[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [filter, setFilter] = useState<Filter>(DEFAULT_FILTER);
-  const [sheet, setSheet] = useState(false);
+  const [sort, setSort] = useState<Sort>(DEFAULT_SORT);
+  const [dropdown, setDropdown] = useState(false);
+  const anim = useRef(new Animated.Value(0)).current;
   const [menuFor, setMenuFor] = useState<Playlist | null>(null);
   const pins = usePins();
   useLoadingBar(playlists === null && !error);
 
   useEffect(() => {
     AsyncStorage.getItem(FILTER_KEY)
-      .then((raw) => raw && setFilter({ ...DEFAULT_FILTER, ...JSON.parse(raw) }))
+      .then((raw) => {
+        const saved = raw && JSON.parse(raw)?.sort;
+        if (SORTS.some((o) => o.key === saved)) setSort(saved);
+      })
       .catch(() => {});
   }, []);
 
-  const applyFilter = (patch: Partial<Filter>) => {
-    const next = { ...filter, ...patch };
-    setFilter(next);
-    AsyncStorage.setItem(FILTER_KEY, JSON.stringify(next)).catch(() => {});
+  // Mounted only while open, so a stale overlay can never linger and eat taps.
+  const mountedRef = useRef(false);
+  const close = useCallback(() => {
+    mountedRef.current = false;
+    Animated.timing(anim, {
+      toValue: 0,
+      duration: 110,
+      easing: Easing.in(Easing.quad),
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished && !mountedRef.current) setDropdown(false);
+    });
+  }, [anim]);
+  const toggle = useCallback(
+    (open: boolean) => {
+      if (!open) return close();
+      mountedRef.current = true;
+      anim.setValue(0);
+      setDropdown(true);
+      Animated.timing(anim, {
+        toValue: 1,
+        duration: 160,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start();
+    },
+    [anim, close],
+  );
+
+  const pickSort = (next: Sort) => {
+    setSort(next);
+    toggle(false);
+    AsyncStorage.setItem(FILTER_KEY, JSON.stringify({ sort: next })).catch(() => {});
   };
 
-  const filtered = filter.sort !== DEFAULT_FILTER.sort || filter.privacy !== DEFAULT_FILTER.privacy;
+  const sortLabel = SORTS.find((o) => o.key === sort)!.label;
 
-  // The filter button sits at the right of the title banner, as in YouTube.
+  // The sort dropdown sits at the right of the title banner.
   useLayoutEffect(() => {
     navigation.setOptions({
-      headerRight: () => <FilterButton active={filtered} onPress={() => setSheet(true)} />,
+      headerRight: () => (
+        <Pressable
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={`Sort by: ${sortLabel}`}
+          onPress={() => toggle(!mountedRef.current)}
+          style={({ pressed }) => [styles.dropBtn, { backgroundColor: t.surface }, pressed && { opacity: 0.6 }]}>
+          <Text style={[styles.dropText, { color: t.text }]}>{sortLabel}</Text>
+          <Ionicons name="chevron-down" size={16} color={t.text} />
+        </Pressable>
+      ),
     });
-  }, [navigation, filtered]);
+  }, [navigation, sortLabel, t, toggle]);
 
   const load = useCallback(async () => {
     setError(null);
@@ -101,7 +132,7 @@ export default function PlaylistsScreen() {
     load();
   }, [load]);
 
-  const shown = useMemo(() => (playlists ? arrange(playlists, filter) : null), [playlists, filter]);
+  const shown = useMemo(() => (playlists ? arrange(playlists, sort) : null), [playlists, sort]);
   const pinnedIds = useMemo(
     () => new Set(pinnedPlaylists(playlists ?? [], pins).map((p) => p.id)),
     [playlists, pins],
@@ -131,8 +162,6 @@ export default function PlaylistsScreen() {
       </View>
     );
 
-  const sortLabel = SORTS.find((s) => s.key === filter.sort)!.label;
-  const privacyLabel = PRIVACIES.find((p) => p.key === filter.privacy)!.label;
   const menuPinned = !!menuFor && pinnedIds.has(menuFor.id);
 
   return (
@@ -141,19 +170,6 @@ export default function PlaylistsScreen() {
         data={shown}
         keyExtractor={(p) => p.id}
         contentContainerStyle={{ paddingBottom: 80 }}
-        ListHeaderComponent={
-          filtered ? (
-            <Pressable onPress={() => setSheet(true)} style={styles.summary}>
-              <Text style={[styles.summaryText, { color: t.secondary }]}>
-                {sortLabel}
-                {filter.privacy !== 'all' ? ` · ${privacyLabel}` : ''}
-              </Text>
-              <Pressable hitSlop={8} onPress={() => applyFilter(DEFAULT_FILTER)}>
-                <Text style={[styles.summaryText, { color: t.link }]}>Reset</Text>
-              </Pressable>
-            </Pressable>
-          ) : null
-        }
         renderItem={({ item }) => {
           const pinned = pinnedIds.has(item.id);
           return (
@@ -195,9 +211,7 @@ export default function PlaylistsScreen() {
         ListEmptyComponent={
           <View style={styles.center}>
             <Text style={{ color: t.secondary }}>
-              {playlists.length === 0
-                ? 'No playlists yet. Save a video to create one.'
-                : `No ${privacyLabel.toLowerCase()} playlists.`}
+              No playlists yet. Save a video to create one.
             </Text>
           </View>
         }
@@ -213,19 +227,36 @@ export default function PlaylistsScreen() {
           />
         }
       />
-      <FilterSheet
-        visible={sheet}
-        onClose={() => setSheet(false)}
-        groups={[
-          { title: 'Sort by', value: filter.sort, options: SORTS, onChange: (sort: Sort) => applyFilter({ sort }) },
-          {
-            title: 'Privacy',
-            value: filter.privacy,
-            options: PRIVACIES,
-            onChange: (privacy: Privacy) => applyFilter({ privacy }),
-          },
-        ]}
-      />
+      {dropdown && (
+      <View style={StyleSheet.absoluteFill}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={() => toggle(false)} />
+        <Animated.View
+          style={[
+            styles.menu,
+            {
+              backgroundColor: t.dark ? '#212121' : '#fff',
+              borderColor: t.divider,
+              opacity: anim,
+              transform: [
+                { translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [-8, 0] }) },
+                { scale: anim.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1] }) },
+              ],
+            },
+          ]}>
+          {SORTS.map((o) => (
+            <Pressable
+              key={o.key}
+              onPress={() => pickSort(o.key)}
+              style={({ pressed }) => [styles.menuItem, pressed && { backgroundColor: t.surface }]}>
+              <Text style={[styles.menuText, { color: t.text, fontWeight: o.key === sort ? '700' : '400' }]}>
+                {o.label}
+              </Text>
+              {o.key === sort && <Ionicons name="checkmark" size={18} color={t.text} />}
+            </Pressable>
+          ))}
+        </Animated.View>
+      </View>
+      )}
       <ActionSheet
         visible={!!menuFor}
         title={menuFor?.title}
@@ -266,6 +297,30 @@ const styles = StyleSheet.create({
   kebab: { width: 40, alignItems: 'center', paddingTop: 2 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12 },
   retryBtn: { paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20 },
-  summary: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 8 },
-  summaryText: { fontSize: 13, fontWeight: '500' },
+  dropBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    height: 32,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    marginRight: 12,
+  },
+  dropText: { fontSize: 14, fontWeight: '500' },
+  menu: {
+    position: 'absolute',
+    top: 4,
+    right: 12,
+    minWidth: 190,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingVertical: 6,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  menuItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingHorizontal: 16, height: 44 },
+  menuText: { fontSize: 15 },
 });

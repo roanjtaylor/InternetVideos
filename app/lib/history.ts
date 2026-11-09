@@ -92,6 +92,11 @@ export function watchedFraction(videoId: string, entries_ = entries): number | n
   return Math.min(1, e.position / d);
 }
 
+/** The most recently watched video that was left part-way (past the start margin, not finished). */
+export function lastIncomplete(list: HistoryEntry[] | null): HistoryEntry | null {
+  return list?.find((e) => (e.position ?? 0) >= RESUME_MARGIN) ?? null;
+}
+
 export async function removeFromHistory(videoId: string) {
   const list = await load();
   entries = list.filter((e) => e.video.id !== videoId);

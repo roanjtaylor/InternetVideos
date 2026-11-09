@@ -26,6 +26,8 @@ export type Video = {
   playlistItemId?: string;
   /** Set when the video came from a playlist: when it was added there. */
   addedAt?: string;
+  /** Channel avatar, filled in for search results. */
+  channelThumbnail?: string | null;
 };
 
 export type Page = { videos: Video[]; nextPage?: string | null };
@@ -50,7 +52,7 @@ export type Channel = {
   subscriptionId?: string;
 };
 
-export type ChannelInfo = Channel & { subscriberCount: number | null };
+export type ChannelInfo = Channel & { subscriberCount: number | null; handle?: string | null };
 
 export type Rating = 'like' | 'dislike' | 'none';
 
@@ -63,22 +65,29 @@ export type Quota = { day: string; used: number; search: number; writes: number;
 
 const emptyQuota = (day: string): Quota => ({ day, used: 0, search: 0, writes: 0, reads: 0 });
 let quota: Quota = emptyQuota('');
-let quotaLoaded = false;
 
 function pacificDay(): string {
-  return new Date(Date.now() - 8 * 3600 * 1000).toISOString().slice(0, 10);
+  // en-CA formats as YYYY-MM-DD; the zone handles daylight saving.
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
 }
 
-async function chargeQuota(units: number, kind: QuotaKind) {
-  if (!quotaLoaded) {
-    quotaLoaded = true;
-    try {
-      const raw = await AsyncStorage.getItem('quota');
-      if (raw) quota = { ...emptyQuota(''), ...JSON.parse(raw) };
-    } catch {
-      // ignore
-    }
+/**
+ * Today's tally is read from storage once, at startup. Every charge waits for
+ * it, so calls made in parallel right after launch cannot be lost to (or wipe)
+ * the stored count, and the profile can wait for it before drawing.
+ */
+export const quotaReady: Promise<void> = (async () => {
+  try {
+    const raw = await AsyncStorage.getItem('quota');
+    if (raw) quota = { ...emptyQuota(''), ...JSON.parse(raw) };
+  } catch {
+    // ignore
   }
+  if (quota.day !== pacificDay()) quota = emptyQuota(pacificDay());
+})();
+
+async function chargeQuota(units: number, kind: QuotaKind) {
+  await quotaReady;
   const day = pacificDay();
   if (quota.day !== day) quota = emptyQuota(day);
   quota.used += units;
@@ -87,7 +96,8 @@ async function chargeQuota(units: number, kind: QuotaKind) {
 }
 
 export function quotaStatus() {
-  return { ...quota, limit: 10000 };
+  const q = quota.day === pacificDay() ? quota : emptyQuota(pacificDay());
+  return { ...q, limit: 10000 };
 }
 
 // ---- Raw calls -------------------------------------------------------------
@@ -173,7 +183,9 @@ async function pool<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R>): 
 // ---- Shaping ---------------------------------------------------------------
 
 function bestThumb(sn: any): string | null {
-  return sn?.thumbnails?.medium?.url ?? sn?.thumbnails?.high?.url ?? sn?.thumbnails?.default?.url ?? null;
+  const th = sn?.thumbnails;
+  // Largest first: a full-width card on a phone is ~1000 physical pixels across.
+  return th?.maxres?.url ?? th?.standard?.url ?? th?.high?.url ?? th?.medium?.url ?? th?.default?.url ?? null;
 }
 
 function videoFromPlaylistItem(item: any): Video {
@@ -293,6 +305,7 @@ export async function channelInfo(channelId: string): Promise<ChannelInfo> {
     title: c.snippet?.title ?? '',
     thumbnail: c.snippet?.thumbnails?.medium?.url ?? c.snippet?.thumbnails?.default?.url ?? null,
     subscriberCount: c.statistics?.hiddenSubscriberCount ? null : Number(c.statistics?.subscriberCount ?? 0),
+    handle: c.snippet?.customUrl ?? null,
   };
 }
 
@@ -323,23 +336,55 @@ export async function getRating(videoId: string): Promise<Rating> {
 /** A channel's uploads playlist is its id with UC swapped for UU. */
 export const uploadsPlaylistId = (channelId: string) => 'UU' + channelId.slice(2);
 
-/** Latest uploads across every subscription. ~1 unit per channel. Shorts removed. */
-export async function subscriptionsFeed(perChannel = 5, limit = 120): Promise<Video[]> {
-  const channels = await cached('subscriptions', 30 * 60, mySubscriptions);
-  const results = await pool(channels, 6, (c) =>
-    ytGet('playlistItems', {
-      part: 'snippet,contentDetails',
-      playlistId: uploadsPlaylistId(c.id),
-      maxResults: perChannel,
-    }),
-  );
-  const videos: Video[] = [];
-  for (const r of results) {
-    if (r instanceof Error) continue; // a channel with no uploads 404s
-    for (const it of r.items ?? []) videos.push(videoFromPlaylistItem(it));
+const xmlDecode = (t: string) =>
+  t.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'");
+
+/** A channel's latest ~15 uploads from its public Atom feed. Not the Data API: costs no quota. */
+async function channelFeed(channelId: string): Promise<Video[]> {
+  const res = await fetch(`https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`);
+  if (!res.ok) throw new Error(`feed ${res.status}`);
+  const xml = await res.text();
+  const out: Video[] = [];
+  for (const m of xml.matchAll(/<entry>([\s\S]*?)<\/entry>/g)) {
+    const e = m[1];
+    const id = /<yt:videoId>([^<]+)</.exec(e)?.[1];
+    const published = /<published>([^<]+)</.exec(e)?.[1];
+    if (!id || !published) continue;
+    out.push({
+      id,
+      title: xmlDecode(/<title>([^<]*)</.exec(e)?.[1] ?? ''),
+      channelId,
+      channelTitle: xmlDecode(/<author>\s*<name>([^<]*)</.exec(e)?.[1] ?? ''),
+      publishedAt: published,
+      thumbnail: `https://i.ytimg.com/vi/${id}/hqdefault.jpg`,
+    });
   }
-  const newest = sortNewest(videos).slice(0, limit);
-  return enrich(newest, true);
+  return out;
+}
+
+/**
+ * Every subscription's recent uploads, newest first, found through the free
+ * channel feeds (0 quota units). Only the pages the user actually scrolls to
+ * are then looked up with the Data API (see subscriptionsFeedPage).
+ */
+export async function subscriptionsIndex(limit = 200): Promise<Video[]> {
+  const channels = await cached('subscriptions', 30 * 60, mySubscriptions);
+  const results = await pool(channels, 8, (c) => channelFeed(c.id));
+  const videos: Video[] = [];
+  for (const r of results) if (!(r instanceof Error)) videos.push(...r);
+  return sortNewest(videos).slice(0, limit);
+}
+
+/** The next `want` non-Short videos from the index starting at `offset`. ~1 unit per page. */
+export async function subscriptionsFeedPage(index: Video[], offset: number, want: number): Promise<Page> {
+  const out: Video[] = [];
+  let i = offset;
+  while (out.length < want && i < index.length) {
+    const batch = index.slice(i, i + Math.max(want, 4));
+    i += batch.length;
+    out.push(...(await enrich(batch.map((v) => ({ ...v })), true)));
+  }
+  return { videos: out, nextPage: i < index.length ? String(i) : null };
 }
 
 /** One page of a playlist: up to `pages` API pages of 50 from `pageToken`. */
@@ -429,10 +474,46 @@ export async function myPlaylists(): Promise<Playlist[]> {
 }
 
 /** 100 units per call: only on explicit submit. Shorts removed. */
-export async function searchVideos(query: string): Promise<Video[]> {
-  const resp = await ytGet('search', { part: 'snippet', q: query, type: 'video', maxResults: 25 }, 100);
-  const videos = (resp.items ?? []).map(videoFromSearchItem).filter((v: Video) => !!v.id);
-  return enrich(videos, true);
+const SEARCH_BATCH = 18;
+
+/**
+ * One "page" is at least SEARCH_BATCH videos: Shorts are dropped after the
+ * fact, so a raw 25-result page can shrink to a handful. Fetches up to 3 raw
+ * pages (100 units each) to fill the batch, then adds channel avatars (1 unit).
+ */
+export async function searchVideos(query: string, pageToken?: string | null): Promise<Page> {
+  const out: Video[] = [];
+  const seen = new Set<string>();
+  let token: string | null = pageToken ?? null;
+  for (let i = 0; i < 3; i++) {
+    const resp = await ytGet(
+      'search',
+      { part: 'snippet', q: query, type: 'video', maxResults: 25, ...(token ? { pageToken: token } : {}) },
+      100,
+    );
+    const raw = (resp.items ?? []).map(videoFromSearchItem).filter((v: Video) => !!v.id && !seen.has(v.id));
+    raw.forEach((v: Video) => seen.add(v.id));
+    out.push(...(await enrich(raw, true)));
+    token = resp.nextPageToken ?? null;
+    if (!token || out.length >= SEARCH_BATCH) break;
+  }
+  await addChannelAvatars(out);
+  return { videos: out, nextPage: token };
+}
+
+/** channels.list in batches of 50 (1 unit each): fills `channelThumbnail`. */
+async function addChannelAvatars(videos: Video[]): Promise<void> {
+  const ids = [...new Set(videos.map((v) => v.channelId).filter(Boolean))];
+  const batches: string[][] = [];
+  for (let i = 0; i < ids.length; i += 50) batches.push(ids.slice(i, i + 50));
+  const results = await pool(batches, 2, (b) => ytGet('channels', { part: 'snippet', id: b.join(','), maxResults: 50 }));
+  const thumbs = new Map<string, string | null>();
+  for (const r of results) {
+    if (r instanceof Error) continue;
+    for (const c of r.items ?? [])
+      thumbs.set(c.id, c.snippet?.thumbnails?.medium?.url ?? c.snippet?.thumbnails?.default?.url ?? null);
+  }
+  for (const v of videos) v.channelThumbnail = thumbs.get(v.channelId) ?? null;
 }
 
 /** The signed-in user's own channel: name, handle and avatar. 1 unit. */
@@ -471,7 +552,7 @@ export async function createPlaylist(title: string, privacy: 'private' | 'unlist
   return { id: resp.id as string, title: resp.snippet?.title as string };
 }
 
-export async function rateVideo(videoId: string, rating: 'like' | 'none'): Promise<void> {
+export async function rateVideo(videoId: string, rating: 'like' | 'dislike' | 'none'): Promise<void> {
   await ytPost('videos/rate', { id: videoId, rating }, undefined, 50);
 }
 

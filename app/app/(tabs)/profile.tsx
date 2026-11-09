@@ -1,22 +1,25 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import { VideoRow } from '@/components/VideoList';
 import { QuotaDonut } from '@/components/QuotaDonut';
 import { Skeleton } from '@/components/Skeleton';
-import { api, Me } from '@/lib/api';
+import { api, Me, timeAgo } from '@/lib/api';
+import { useWatchHistory } from '@/lib/history';
 import { GoogleAccount, googleAccount, signOut } from '@/lib/auth';
 import { useLoadingBar } from '@/lib/loading';
 import { useTheme } from '@/lib/theme';
 
 /**
  * You: the signed-in Google account and YouTube channel, today's API quota
- * as a chart, cache and sign-out controls. Watch history is deliberately
- * absent until a source for it exists.
+ * as a chart, your watch history, cache and sign-out controls.
  */
 export default function ProfileScreen() {
   const t = useTheme();
+  const router = useRouter();
+  const history = useWatchHistory();
   const [me, setMe] = useState<Me | null | undefined>(undefined);
   const [account, setAccount] = useState<GoogleAccount | null | undefined>(undefined);
   const [quota, setQuota] = useState(api.quota());
@@ -27,6 +30,7 @@ export default function ProfileScreen() {
     const [m, a] = await Promise.all([api.me().catch(() => null), googleAccount().catch(() => null)]);
     setMe(m);
     setAccount(a);
+    await api.quotaReady;
     setQuota(api.quota());
   }, []);
 
@@ -37,7 +41,7 @@ export default function ProfileScreen() {
   // The quota moves as other tabs fetch; re-read it every time this tab shows.
   useFocusEffect(
     useCallback(() => {
-      setQuota(api.quota());
+      api.quotaReady.then(() => setQuota(api.quota()));
     }, []),
   );
 
@@ -110,6 +114,27 @@ export default function ProfileScreen() {
         )}
       </View>
 
+      <View style={styles.sectionHeader}>
+        <Text style={[styles.cardTitle, { color: t.text, flex: 1 }]}>History</Text>
+        {!!history && history.length > 0 && (
+          <Pressable hitSlop={8} onPress={() => router.push('/history')}>
+            <Text style={{ color: t.link, fontSize: 14, fontWeight: '600' }}>View all</Text>
+          </Pressable>
+        )}
+      </View>
+      {history === null || history.length === 0 ? (
+        <Text style={[styles.sub, { color: t.secondary, paddingHorizontal: 16, paddingBottom: 16 }]}>
+          Videos you watch in this app appear here, newest first.
+        </Text>
+      ) : (
+        history.slice(0, 5).map((e) => (
+          <View key={e.video.id}>
+            <VideoRow video={e.video} />
+            <Text style={[styles.watched, { color: t.secondary }]}>Watched {timeAgo(e.watchedAt)}</Text>
+          </View>
+        ))
+      )}
+
       <View style={[styles.card, { backgroundColor: t.surface }]}>
         <View style={styles.cardHeader}>
           <Text style={[styles.cardTitle, { color: t.text }]}>YouTube API quota</Text>
@@ -160,6 +185,8 @@ const styles = StyleSheet.create({
   cardHeader: { gap: 2 },
   cardTitle: { fontSize: 16, fontWeight: '600' },
   note: { fontSize: 12, lineHeight: 16 },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 8 },
+  watched: { fontSize: 11, marginLeft: 184, marginTop: -6, marginBottom: 6 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 14 },
   rowText: { fontSize: 16 },
 });

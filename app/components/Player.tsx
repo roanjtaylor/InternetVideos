@@ -1,4 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { usePathname, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -26,9 +27,9 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import YoutubePlayer, { YoutubeIframeRef } from 'react-native-youtube-iframe';
 
-import { api, ChannelInfo, formatCount, formatDuration, shortDate, timeAgo, Video } from '@/lib/api';
+import { api, ChannelInfo, formatCount, Rating, shortDate, timeAgo, Video } from '@/lib/api';
 import { saveProgress } from '@/lib/history';
-import { allowRotation, lockLandscape, lockPortrait } from '@/lib/orientation';
+import { allowRotation, lockPortrait } from '@/lib/orientation';
 import {
   closePlayer,
   expandPlayer,
@@ -41,14 +42,13 @@ import {
 import { useTheme } from '@/lib/theme';
 
 const TAB_BAR_H = 49;
-const TAB_ROUTES = new Set(['/', '/playlists', '/search', '/subscriptions', '/profile']);
+const TAB_ROUTES = new Set(['/', '/playlists', '/subscriptions', '/profile']);
 const MINI_DEFAULT_W = 176;
 const MINI_MIN_W = 120;
 const MINI_MARGIN = 12;
 const MINI_RADIUS = 12;
 const SPRING = { damping: 22, stiffness: 240, mass: 0.8 };
 const PROGRESS_EVERY_MS = 5000;
-const CONTROLS_HIDE_MS = 3000;
 
 /**
  * Runs inside the embed page. Three fixes to YouTube's defaults:
@@ -155,32 +155,12 @@ function PlayerView() {
   const isMini = mode === 'mini';
   const playerRef = useRef<YoutubeIframeRef>(null);
 
-  // Our fullscreen button follows the embed's own controls, which we cannot
-  // see into: shown on any touch of the video and while paused, hidden a few
-  // seconds into playback, the way YouTube's controls fade.
-  const [controlsShown, setControlsShown] = useState(true);
-  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const showControls = useCallback(() => {
-    setControlsShown(true);
-    if (hideTimer.current) clearTimeout(hideTimer.current);
-    hideTimer.current = setTimeout(() => setControlsShown(false), CONTROLS_HIDE_MS);
-  }, []);
-  useEffect(() => {
-    if (playing) showControls();
-    else {
-      if (hideTimer.current) clearTimeout(hideTimer.current);
-      setControlsShown(true);
-    }
-  }, [playing, session, showControls]);
-  useEffect(() => () => {
-    if (hideTimer.current) clearTimeout(hideTimer.current);
-  }, []);
-
   // Full-size video box: full width in portrait; in landscape as large as fits, letterboxed.
   const videoW = landscape ? Math.min(W, Math.round((H * 16) / 9)) : W;
   const videoH = landscape ? Math.min(H, Math.round((W * 9) / 16)) : Math.round((W * 9) / 16);
   const videoLeft = Math.round((W - videoW) / 2);
-  const videoTop = landscape ? Math.round((H - videoH) / 2) : insets.top;
+  // Portrait: the video starts at the very top of the screen, under the hidden status bar, like YouTube.
+  const videoTop = landscape ? Math.round((H - videoH) / 2) : 0;
   const bottomOffset = (TAB_ROUTES.has(pathname) ? TAB_BAR_H : 0) + insets.bottom;
   const minY = insets.top + MINI_MARGIN;
   const maxMiniW = W - 2 * MINI_MARGIN;
@@ -230,23 +210,6 @@ function PlayerView() {
   }, [mode]);
   useEffect(() => () => {
     lockPortrait();
-  }, []);
-
-  // The fullscreen button, bottom right over the embed's logo: portrait turns
-  // the screen to landscape; landscape returns to portrait and, a moment later
-  // (once the phone is likely upright again), lets it follow the phone.
-  const relockTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const toggleFullscreen = useCallback(() => {
-    if (relockTimer.current) clearTimeout(relockTimer.current);
-    if (landscape) {
-      lockPortrait();
-      relockTimer.current = setTimeout(allowRotation, 3000);
-    } else {
-      lockLandscape();
-    }
-  }, [landscape]);
-  useEffect(() => () => {
-    if (relockTimer.current) clearTimeout(relockTimer.current);
   }, []);
 
   // ---- Progress: remembered every few seconds so the next open resumes ------
@@ -468,7 +431,7 @@ function PlayerView() {
 
   return (
     <View style={[styles.container, { width: W, height: H }]} pointerEvents={isMini ? 'box-none' : 'auto'}>
-      <StatusBar hidden={landscape && !isMini} />
+      <StatusBar hidden={!isMini} />
       <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: bg }, backdrop]} pointerEvents="none" />
 
       {/* Portrait, full mode: title, channel, counts, actions, description. */}
@@ -476,7 +439,13 @@ function PlayerView() {
         <Animated.View
           style={[styles.details, { top: videoTop + videoH }, backdrop]}
           pointerEvents={isMini ? 'none' : 'auto'}>
-          <Details video={video} />
+          <Details
+            video={video}
+            onSeek={(sec) => {
+              playerRef.current?.seekTo(sec, true);
+              setPlaying(true);
+            }}
+          />
         </Animated.View>
       )}
 
@@ -489,7 +458,6 @@ function PlayerView() {
       {/* The video, scaled between full size and the mini window. */}
       <GestureDetector gesture={gesture}>
         <Animated.View
-          onTouchStart={showControls}
           style={[styles.videoBox, { width: videoW, height: videoH, overflow: 'hidden' }, videoBox]}>
           <YoutubePlayer
             key={session}
@@ -502,15 +470,6 @@ function PlayerView() {
             initialPlayerParams={playerParams}
             webViewProps={WEBVIEW_PROPS}
           />
-          {!isMini && controlsShown && (
-            <Pressable
-              onPress={toggleFullscreen}
-              hitSlop={6}
-              accessibilityLabel={landscape ? 'Exit full screen' : 'Full screen'}
-              style={({ pressed }) => [styles.fullscreenBtn, pressed && { opacity: 0.6 }]}>
-              <Ionicons name={landscape ? 'contract' : 'expand'} size={20} color="#fff" />
-            </Pressable>
-          )}
         </Animated.View>
       </GestureDetector>
 
@@ -544,28 +503,28 @@ function PlayerView() {
  * Save and Ask buttons. Details missing from the list row (views, likes,
  * description) are fetched once per video.
  */
-function Details({ video }: { video: Video }) {
+function Details({ video, onSeek }: { video: Video; onSeek: (seconds: number) => void }) {
   const t = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [expanded, setExpanded] = useState(false);
   const [channel, setChannel] = useState<ChannelInfo | null>(null);
   const [subscriptionId, setSubscriptionId] = useState<string | null | undefined>(undefined);
-  const [liked, setLiked] = useState<boolean | undefined>(undefined);
+  const [rating, setRating] = useState<Rating | undefined>(undefined);
   const [busy, setBusy] = useState<'sub' | 'like' | null>(null);
 
   useEffect(() => {
     setExpanded(false);
     setChannel(null);
     setSubscriptionId(undefined);
-    setLiked(undefined);
+    setRating(undefined);
     let alive = true;
-    if (video.viewCount === undefined || video.likeCount === undefined || !video.description) {
-      api
-        .video(video.id)
-        .then((d) => alive && updateVideo(d))
-        .catch(() => {});
-    }
+    // Always fetch: playlist and search rows carry a shortened description, and
+    // this call (cached for half an hour, 1 unit) brings the full text and exact counts.
+    api
+      .video(video.id)
+      .then((d) => alive && updateVideo(d))
+      .catch(() => {});
     api
       .channelInfo(video.channelId)
       .then((c) => alive && setChannel(c))
@@ -576,12 +535,12 @@ function Details({ video }: { video: Video }) {
       .catch(() => alive && setSubscriptionId(null));
     api
       .rating(video.id)
-      .then((r) => alive && setLiked(r === 'like'))
-      .catch(() => alive && setLiked(false));
+      .then((r) => alive && setRating(r))
+      .catch(() => alive && setRating('none'));
     return () => {
       alive = false;
     };
-  }, [video.id, video.channelId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [video.id, video.channelId]);
 
   const toggleSubscribe = async () => {
     if (busy || subscriptionId === undefined) return;
@@ -600,18 +559,23 @@ function Details({ video }: { video: Video }) {
     }
   };
 
-  const toggleLike = async () => {
-    if (busy || liked === undefined) return;
+  const rate = async (target: 'like' | 'dislike') => {
+    if (busy || rating === undefined) return;
     setBusy('like');
-    const next = !liked;
-    setLiked(next);
+    const prev = rating;
+    const next: Rating = prev === target ? 'none' : target;
+    setRating(next);
     try {
-      if (next) await api.like(video.id);
+      if (next === 'like') await api.like(video.id);
+      else if (next === 'dislike') await api.dislike(video.id);
       else await api.unlike(video.id);
-      if (video.likeCount !== undefined) updateVideo({ likeCount: Math.max(0, video.likeCount + (next ? 1 : -1)) });
+      if (video.likeCount !== undefined) {
+        const delta = (next === 'like' ? 1 : 0) - (prev === 'like' ? 1 : 0);
+        if (delta) updateVideo({ likeCount: Math.max(0, video.likeCount + delta) });
+      }
     } catch (e: any) {
-      setLiked(!next);
-      Alert.alert('Could not update like', e.message ?? String(e));
+      setRating(prev);
+      Alert.alert('Could not update rating', e.message ?? String(e));
     } finally {
       setBusy(null);
     }
@@ -629,22 +593,18 @@ function Details({ video }: { video: Video }) {
     router.push({ pathname: '/channel/[id]', params: { id: video.channelId, title: video.channelTitle } });
   };
 
-  const counts = [
+  const meta = [
+    channel?.handle ?? null,
     video.viewCount !== undefined ? `${formatCount(video.viewCount)} views` : null,
-    video.likeCount !== undefined ? `${formatCount(video.likeCount)} likes` : null,
-    video.publishedAt ? (expanded ? shortDate(video.publishedAt) : timeAgo(video.publishedAt)) : null,
+    video.publishedAt ? timeAgo(video.publishedAt) : null,
   ]
     .filter(Boolean)
     .join(' · ');
 
   return (
     <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}>
-      <Pressable onPress={() => setExpanded((v) => !v)} style={styles.titleRow}>
-        <Text style={[styles.title, { color: t.text }]} numberOfLines={expanded ? undefined : 1}>
-          {video.title}
-        </Text>
-        <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={18} color={t.secondary} />
-      </Pressable>
+      <Text style={[styles.title, { color: t.text }]}>{video.title}</Text>
+      {!!meta && <Text style={[styles.meta, { color: t.secondary }]}>{meta}</Text>}
 
       <View style={styles.channelRow}>
         <Pressable onPress={openChannel} style={styles.channelInfo}>
@@ -656,16 +616,10 @@ function Details({ video }: { video: Video }) {
           <View style={{ flex: 1 }}>
             <Text style={[styles.channelName, { color: t.text }]} numberOfLines={1}>
               {video.channelTitle}
-              {channel?.subscriberCount != null && (
-                <Text style={{ color: t.secondary, fontWeight: '400' }}>
-                  {'  '}
-                  {formatCount(channel.subscriberCount)}
-                </Text>
-              )}
             </Text>
-            {!!counts && (
+            {channel?.subscriberCount != null && (
               <Text style={[styles.counts, { color: t.secondary }]} numberOfLines={1}>
-                {counts}
+                {formatCount(channel.subscriberCount)} subscribers
               </Text>
             )}
           </View>
@@ -691,12 +645,22 @@ function Details({ video }: { video: Video }) {
       </View>
 
       <View style={styles.actions}>
-        <ActionButton
-          icon={liked ? 'thumbs-up' : 'thumbs-up-outline'}
-          label={video.likeCount !== undefined ? formatCount(video.likeCount) : 'Like'}
-          active={!!liked}
-          onPress={toggleLike}
-        />
+        <View style={[styles.rateGroup, { backgroundColor: t.surface }]}>
+          <Pressable onPress={() => rate('like')} style={({ pressed }) => [styles.rateBtn, pressed && { opacity: 0.6 }]}>
+            <MaterialIcons name={rating === 'like' ? 'thumb-up' : 'thumb-up-off-alt'} size={20} color={t.text} />
+            {video.likeCount !== undefined && (
+              <Text style={[styles.actionText, { color: t.text }]}>{formatCount(video.likeCount)}</Text>
+            )}
+          </Pressable>
+          <View style={[styles.rateDivider, { backgroundColor: t.secondary }]} />
+          <Pressable onPress={() => rate('dislike')} style={({ pressed }) => [styles.rateBtn, pressed && { opacity: 0.6 }]}>
+            <MaterialIcons
+              name={rating === 'dislike' ? 'thumb-down' : 'thumb-down-off-alt'}
+              size={20}
+              color={t.text}
+            />
+          </Pressable>
+        </View>
         <ActionButton
           icon="bookmark-outline"
           label="Save"
@@ -705,25 +669,72 @@ function Details({ video }: { video: Video }) {
         <ActionButton icon="sparkles-outline" label="Ask" onPress={ask} />
       </View>
 
-      {expanded && (
+      {expanded ? (
         <View style={[styles.description, { backgroundColor: t.surface }]}>
-          <Text style={[styles.descMeta, { color: t.text }]}>
-            {[
-              video.viewCount !== undefined ? `${formatCount(video.viewCount)} views` : null,
-              video.publishedAt ? shortDate(video.publishedAt) : null,
-              video.duration ? formatDuration(video.duration) : null,
-            ]
-              .filter(Boolean)
-              .join('  ')}
-          </Text>
+          <View style={styles.stats}>
+            {video.viewCount !== undefined && <Stat value={video.viewCount.toLocaleString()} label="Views" />}
+            {video.likeCount !== undefined && <Stat value={video.likeCount.toLocaleString()} label="Likes" />}
+            {!!video.publishedAt && <Stat value={shortDate(video.publishedAt)} label="Published" />}
+          </View>
           {!!video.description && (
             <Text style={[styles.descriptionText, { color: t.text }]} selectable>
-              {video.description.trim()}
+              <LinkedText text={video.description.trim()} onSeek={onSeek} color={t.link} />
             </Text>
           )}
+          <Pressable onPress={() => setExpanded(false)} hitSlop={8}>
+            <Text style={[styles.seeMore, { color: t.text }]}>Show less</Text>
+          </Pressable>
         </View>
+      ) : (
+        <Pressable onPress={() => setExpanded(true)} style={[styles.seeMoreBtn, { backgroundColor: t.surface }]}>
+          <Text style={[styles.seeMore, { color: t.text }]}>See more</Text>
+        </Pressable>
       )}
     </ScrollView>
+  );
+}
+
+const LINKS = /(https?:\/\/[^\s<>"']+|www\.[^\s<>"']+)|(?<![\w:])(?:(\d{1,2}):)?(\d{1,2}):([0-5]\d)(?![\w:])/g;
+
+/** Description text with web links (opened in the browser) and 1:23 / 1:02:03 timestamps (seek) made tappable. */
+function LinkedText({ text, onSeek, color }: { text: string; onSeek: (s: number) => void; color: string }) {
+  const parts: React.ReactNode[] = [];
+  let last = 0;
+  for (const m of text.matchAll(LINKS)) {
+    const i = m.index ?? 0;
+    let shown = m[0];
+    if (m[1]) shown = m[1].replace(/[.,;:!?)\]]+$/, ''); // trailing punctuation belongs to the sentence
+    if (i > last) parts.push(text.slice(last, i));
+    if (m[1]) {
+      const href = shown.startsWith('www.') ? `https://${shown}` : shown;
+      parts.push(
+        <Text key={i} style={{ color }} onPress={() => Linking.openURL(href).catch(() => {})}>
+          {shown}
+        </Text>,
+      );
+    } else {
+      const sec = Number(m[2] ?? 0) * 3600 + Number(m[3]) * 60 + Number(m[4]);
+      parts.push(
+        <Text key={i} style={{ color, fontWeight: '600' }} onPress={() => onSeek(sec)}>
+          {m[0]}
+        </Text>,
+      );
+    }
+    last = i + shown.length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return <>{parts}</>;
+}
+
+function Stat({ value, label }: { value: string; label: string }) {
+  const t = useTheme();
+  return (
+    <View style={[styles.stat, { backgroundColor: t.background }]}>
+      <Text style={[styles.statValue, { color: t.text }]} numberOfLines={1} adjustsFontSizeToFit>
+        {value}
+      </Text>
+      <Text style={[styles.statLabel, { color: t.secondary }]}>{label}</Text>
+    </View>
   );
 }
 
@@ -767,8 +778,13 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   details: { position: 'absolute', left: 0, right: 0, bottom: 0 },
-  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingTop: 12 },
-  title: { flex: 1, fontSize: 17, fontWeight: '600', lineHeight: 23 },
+  title: { fontSize: 18, fontWeight: '600', lineHeight: 24, paddingHorizontal: 16, paddingTop: 12 },
+  meta: { fontSize: 13, paddingHorizontal: 16, paddingTop: 4 },
+  rateGroup: { flex: 1.4, flexDirection: 'row', alignItems: 'center', height: 36, borderRadius: 18, overflow: 'hidden' },
+  rateBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, height: 36 },
+  rateDivider: { width: StyleSheet.hairlineWidth, height: 20, opacity: 0.6 },
+  seeMoreBtn: { marginHorizontal: 16, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  seeMore: { fontSize: 14, fontWeight: '600' },
   channelRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingTop: 12 },
   channelInfo: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
   avatar: { width: 36, height: 36, borderRadius: 18 },
@@ -796,20 +812,11 @@ const styles = StyleSheet.create({
   },
   actionText: { fontSize: 14, fontWeight: '600', flexShrink: 1 },
   description: { marginHorizontal: 16, padding: 12, borderRadius: 12, gap: 10 },
-  descMeta: { fontSize: 13, fontWeight: '600' },
+  stats: { flexDirection: 'row', gap: 8 },
+  stat: { flex: 1, borderRadius: 10, paddingVertical: 10, paddingHorizontal: 8, alignItems: 'center', gap: 2 },
+  statValue: { fontSize: 15, fontWeight: '700' },
+  statLabel: { fontSize: 12 },
   descriptionText: { fontSize: 14, lineHeight: 20 },
-  // Sized to sit over the YouTube logo at the right end of the embed's control bar.
-  fullscreenBtn: {
-    position: 'absolute',
-    right: 6,
-    bottom: 6,
-    width: 36,
-    height: 34,
-    borderRadius: 6,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   miniControls: {
     position: 'absolute',
     flexDirection: 'row',

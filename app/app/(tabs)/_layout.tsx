@@ -1,7 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { Tabs } from 'expo-router';
-import type { BottomTabBarButtonProps } from '@react-navigation/bottom-tabs';
+import { Tabs, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -46,22 +45,28 @@ function label(text: string) {
   return TabLabel;
 }
 
-/** Search is a grey circle with no label, like YouTube's centre "+" button. */
-function SearchTabButton({ onPress, onLongPress, accessibilityState, accessibilityLabel, testID }: BottomTabBarButtonProps) {
+/** Top-left brand mark: the app icon and "InternetVideos" in YouTube's heavy, tightly-tracked wordmark style. */
+function HomeTitle() {
   const t = useTheme();
-  const focused = !!accessibilityState?.selected;
+  return (
+    <View style={styles.brand}>
+      <Image source={require('../../assets/images/icon.png')} style={styles.logo} />
+      <Text style={[styles.brandText, { color: t.text }]}>InternetVideos</Text>
+    </View>
+  );
+}
+
+function HomeSearchButton() {
+  const t = useTheme();
+  const router = useRouter();
   return (
     <Pressable
-      onPress={onPress}
-      onLongPress={onLongPress}
+      hitSlop={8}
       accessibilityRole="button"
-      accessibilityState={accessibilityState}
-      accessibilityLabel={accessibilityLabel ?? 'Search'}
-      testID={testID}
-      style={({ pressed }) => [styles.searchButton, pressed && { opacity: 0.7 }]}>
-      <View style={[styles.searchCircle, { backgroundColor: focused ? t.text : t.surfaceHigh }]}>
-        <Ionicons name="search" size={22} color={focused ? t.background : t.text} />
-      </View>
+      accessibilityLabel="Search"
+      onPress={() => router.push('/search')}
+      style={({ pressed }) => [styles.searchButton, pressed && { opacity: 0.6 }]}>
+      <Ionicons name="search" size={24} color={t.text} />
     </Pressable>
   );
 }
@@ -119,7 +124,12 @@ export default function TabLayout() {
       }}>
       <Tabs.Screen
         name="index"
-        options={{ title: 'Home', tabBarLabel: label('Home'), tabBarIcon: icon('home', 'home-outline') }}
+        options={{
+          title: 'Home',
+          headerTitle: () => <HomeTitle />,
+          headerRight: () => <HomeSearchButton />,
+          tabBarLabel: label('Home'), tabBarIcon: icon('home', 'home-outline'),
+        }}
       />
       <Tabs.Screen
         name="subscriptions"
@@ -128,10 +138,6 @@ export default function TabLayout() {
           tabBarLabel: label('Subscriptions'),
           tabBarIcon: mciIcon('play-box-multiple', 'play-box-multiple-outline'),
         }}
-      />
-      <Tabs.Screen
-        name="search"
-        options={{ title: 'Search', headerShown: false, tabBarButton: (props) => <SearchTabButton {...props} /> }}
       />
       <Tabs.Screen
         name="playlists"
@@ -151,6 +157,8 @@ export default function TabLayout() {
 
 const styles = StyleSheet.create({
   label: { fontSize: 10, fontWeight: '400', textAlign: 'center' },
-  searchButton: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  searchCircle: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  brand: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  logo: { width: 28, height: 28, borderRadius: 6 },
+  brandText: { fontSize: 22, fontWeight: '800', letterSpacing: -1.2 },
+  searchButton: { marginRight: 16 },
 });

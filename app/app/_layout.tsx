@@ -92,7 +92,8 @@ export default function RootLayout() {
           <Stack.Screen name="playlist/[id]" />
           <Stack.Screen name="channel/[id]" />
           <Stack.Screen name="channels" options={{ title: 'All subscriptions' }} />
-          <Stack.Screen name="history" options={{ title: 'History' }} />
+          <Stack.Screen name="search" options={{ headerShown: false, animation: 'fade' }} />
+          <Stack.Screen name="history"options={{ title: 'History' }} />
         </Stack>
         <LoadingBar />
         <Player />

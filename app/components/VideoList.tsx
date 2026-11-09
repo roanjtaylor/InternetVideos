@@ -6,7 +6,6 @@ import {
   Alert,
   FlatList,
   Image,
-  Linking,
   Pressable,
   RefreshControl,
   StyleSheet,
@@ -15,11 +14,13 @@ import {
 } from 'react-native';
 
 import { ActionSheet, SheetAction } from '@/components/ActionSheet';
+import { HiResImage } from '@/components/HiResImage';
 import { ListSkeleton } from '@/components/Skeleton';
 import { api, formatDuration, Page, timeAgo, Video } from '@/lib/api';
 import { useWatchHistory, watchedFraction } from '@/lib/history';
 import { useLoadingBar } from '@/lib/loading';
 import { openVideo } from '@/lib/player';
+import { isWatchLaterTitle } from '@/lib/pins';
 import { useTheme } from '@/lib/theme';
 
 export type RowLayout = 'compact' | 'card';
@@ -48,6 +49,7 @@ export function VideoRow({
   const [menu, setMenu] = useState(false);
   const history = useWatchHistory();
   const watched = watchedFraction(video.id, history);
+  avatar = avatar ?? video.channelThumbnail;
 
   const remove = () => {
     if (!playlistId) return;
@@ -68,36 +70,48 @@ export function VideoRow({
     ]);
   };
 
+  const addToWatchLater = async () => {
+    try {
+      const { playlists } = await api.playlists();
+      const wl = playlists.find((p) => p.id !== 'LL' && isWatchLaterTitle(p.title));
+      if (!wl) {
+        Alert.alert('No Watch later playlist', 'Create a playlist called "Watch later" first.');
+        return;
+      }
+      await api.addToPlaylist(wl.id, video.id);
+    } catch (e: any) {
+      Alert.alert('Could not add', e.message ?? String(e));
+    }
+  };
+
   const actions: SheetAction[] = [
+    playlistId
+      ? {
+          key: 'remove',
+          label: `Remove from ${playlistTitle ?? 'playlist'}`,
+          icon: 'trash-outline' as const,
+          destructive: true,
+          onPress: remove,
+        }
+      : {
+          key: 'later',
+          label: 'Add to Watch later',
+          icon: 'time-outline' as const,
+          onPress: addToWatchLater,
+        },
     {
       key: 'save',
       label: 'Save to playlist',
       icon: 'bookmark-outline',
       onPress: () => router.push({ pathname: '/save/[id]', params: { id: video.id, title: video.title } }),
     },
-    ...(playlistId
-      ? [
-          {
-            key: 'remove',
-            label: `Remove from ${playlistTitle ?? 'playlist'}`,
-            icon: 'trash-outline' as const,
-            destructive: true,
-            onPress: remove,
-          },
-        ]
-      : []),
     {
       key: 'channel',
-      label: 'Go to channel',
+      label: video.channelTitle,
       icon: 'person-circle-outline',
+      image: avatar,
       onPress: () =>
         router.push({ pathname: '/channel/[id]', params: { id: video.channelId, title: video.channelTitle } }),
-    },
-    {
-      key: 'open',
-      label: 'Open in YouTube',
-      icon: 'open-outline',
-      onPress: () => Linking.openURL(`https://www.youtube.com/watch?v=${video.id}`),
     },
   ];
 
@@ -126,7 +140,7 @@ export function VideoRow({
   );
 
   const sheet = (
-    <ActionSheet visible={menu} title={video.title} actions={actions} onClose={() => setMenu(false)} />
+    <ActionSheet visible={menu} actions={actions} onClose={() => setMenu(false)} />
   );
 
   const open = () => openVideo(video);
@@ -136,7 +150,7 @@ export function VideoRow({
       <View style={styles.card}>
         <Pressable onPress={open} style={({ pressed }) => [pressed && { opacity: 0.8 }]}>
           <View style={styles.cardThumbWrap}>
-            {thumb(styles.cardThumb)}
+            <HiResImage videoId={video.id} fallback={video.thumbnail} style={styles.cardThumb} />
             {duration}
             {progress}
           </View>

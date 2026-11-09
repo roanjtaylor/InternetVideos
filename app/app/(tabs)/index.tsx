@@ -1,24 +1,24 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
-import { Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { CompactRowSkeleton, Skeleton } from '@/components/Skeleton';
+import { HiResImage } from '@/components/HiResImage';
+import { Skeleton } from '@/components/Skeleton';
 import { VideoRow } from '@/components/VideoList';
 import { api, formatDuration, Playlist, timeAgo, Video } from '@/lib/api';
-import { HistoryEntry, useWatchHistory, watchedFraction } from '@/lib/history';
+import { lastIncomplete, useWatchHistory, watchedFraction } from '@/lib/history';
 import { useLoadingBar } from '@/lib/loading';
 import { pinnedPlaylists, usePins } from '@/lib/pins';
 import { openVideo } from '@/lib/player';
 import { useTheme } from '@/lib/theme';
 
-const HISTORY_PREVIEW = 10;
-const PER_PLAYLIST = 4; // hero plus three rows
+const TOTAL = 3; // the hero plus two rows
 
 /**
- * Home: the playlists you pinned (by default your own "Watch later"), each
- * as a queue with the oldest addition as a big card, then the videos you
- * watched most recently. The history is the app's own record of what it played.
+ * Home: the video you were part-way through as a big card, then the next
+ * videos in your Watch later queue (oldest addition first). The video being
+ * resumed is skipped in the queue, so a third queued video fills its place.
  */
 export default function HomeScreen() {
   const router = useRouter();
@@ -44,7 +44,7 @@ export default function HomeScreen() {
   }, [load]);
 
   const pinned = playlists && pins ? pinnedPlaylists(playlists, pins) : null;
-  const recent = (history ?? []).slice(0, HISTORY_PREVIEW);
+  const resume = lastIncomplete(history)?.video ?? null;
 
   return (
     <ScrollView
@@ -88,33 +88,25 @@ export default function HomeScreen() {
           <Ionicons name="chevron-forward" size={20} color={t.secondary} />
         </Pressable>
       ) : (
-        pinned.map((p) => <PinnedPlaylist key={p.id} playlist={p} />)
-      )}
-
-      <SectionHeader
-        title="History"
-        action={history && history.length > 0 ? { label: 'View all', onPress: () => router.push('/history') } : undefined}
-      />
-      {history === null ? (
-        Array.from({ length: 3 }, (_, i) => <CompactRowSkeleton key={i} />)
-      ) : recent.length === 0 ? (
-        <View style={styles.empty}>
-          <Text style={{ color: t.secondary, textAlign: 'center' }}>
-            Videos you watch in this app appear here, newest first.
-          </Text>
-        </View>
-      ) : (
-        recent.map((e) => <HistoryRow key={e.video.id} entry={e} />)
+        pinned.slice(0, 1).map((p, i) => <PinnedPlaylist key={p.id} playlist={p} resume={i === 0 ? resume : null} historyReady={history !== null} />)
       )}
     </ScrollView>
   );
 }
 
-/** One pinned playlist: its oldest addition as a card, the next few as rows. */
-function PinnedPlaylist({ playlist }: { playlist: Playlist }) {
+/** The home feed: the resume video (if any) as the card, then queued videos. */
+function PinnedPlaylist({
+  playlist,
+  resume,
+  historyReady,
+}: {
+  playlist: Playlist;
+  resume: Video | null;
+  historyReady: boolean;
+}) {
   const router = useRouter();
   const t = useTheme();
-  const [videos, setVideos] = useState<Video[] | null>(null);
+  const [queue, setQueue] = useState<Video[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -125,7 +117,7 @@ function PinnedPlaylist({ playlist }: { playlist: Playlist }) {
         if (!alive) return;
         // Oldest addition first: a queue, so what you saved first is up next.
         const sorted = [...page.videos].sort((a, b) => (a.addedAt ?? '').localeCompare(b.addedAt ?? ''));
-        setVideos(sorted.slice(0, PER_PLAYLIST));
+        setQueue(sorted);
       })
       .catch((e) => alive && setError(e.message ?? String(e)));
     return () => {
@@ -133,11 +125,16 @@ function PinnedPlaylist({ playlist }: { playlist: Playlist }) {
     };
   }, [playlist.id]);
 
+  const videos = queue && historyReady ? [...(resume ? [resume] : []), ...queue.filter((v) => v.id !== resume?.id)].slice(0, TOTAL) : null;
+
   const open = () => router.push({ pathname: '/playlist/[id]', params: { id: playlist.id, title: playlist.title } });
 
   return (
     <View>
-      <SectionHeader title={playlist.title} action={{ label: 'View all', onPress: open }} />
+      <SectionHeader
+        title={resume ? 'Continue watching' : playlist.title}
+        action={{ label: 'View all', onPress: open }}
+      />
       {error ? (
         <Text style={[styles.noticeText, { color: t.danger, paddingHorizontal: 16 }]}>{error}</Text>
       ) : videos === null ? (
@@ -182,11 +179,7 @@ function HeroVideo({ video }: { video: Video }) {
   return (
     <Pressable onPress={() => openVideo(video)} style={({ pressed }) => [pressed && { opacity: 0.85 }]}>
       <View style={styles.hero}>
-        {video.thumbnail ? (
-          <Image source={{ uri: video.thumbnail }} style={StyleSheet.absoluteFill} />
-        ) : (
-          <View style={[StyleSheet.absoluteFill, { backgroundColor: t.surfaceHigh }]} />
-        )}
+        <HiResImage videoId={video.id} fallback={video.thumbnail} style={StyleSheet.absoluteFill} />
         {!!video.duration && <Text style={styles.duration}>{formatDuration(video.duration)}</Text>}
         {watched !== null && watched > 0 && (
           <View style={styles.progressTrack}>
@@ -203,17 +196,6 @@ function HeroVideo({ video }: { video: Video }) {
         </Text>
       </View>
     </Pressable>
-  );
-}
-
-/** A history row: the usual compact row with "watched …" in place of the upload date. */
-function HistoryRow({ entry }: { entry: HistoryEntry }) {
-  const t = useTheme();
-  return (
-    <View>
-      <VideoRow video={entry.video} />
-      <Text style={[styles.watched, { color: t.secondary }]}>Watched {timeAgo(entry.watchedAt)}</Text>
-    </View>
   );
 }
 
@@ -267,5 +249,4 @@ const styles = StyleSheet.create({
   noticeTitle: { fontSize: 15, fontWeight: '600' },
   noticeText: { fontSize: 13, lineHeight: 18, marginTop: 2 },
   empty: { padding: 24, alignItems: 'center' },
-  watched: { fontSize: 11, marginLeft: 184, marginTop: -6, marginBottom: 6 },
 });
