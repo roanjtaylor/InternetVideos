@@ -1,4 +1,4 @@
-(defpackage #:internet-vids
+(defpackage #:internet-videos
   (:use #:cl)
   (:local-nicknames (#:jzon #:com.inuoe.jzon)
                     (#:ht #:hunchentoot)

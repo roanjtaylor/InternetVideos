@@ -1,4 +1,4 @@
-(in-package #:internet-vids)
+(in-package #:internet-videos)
 
 (defparameter *api-base* "https://www.googleapis.com/youtube/v3/")
 

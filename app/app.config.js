@@ -1,9 +1,9 @@
 // Extends app.json.
 //
 // Two app variants share this config, chosen by APP_VARIANT:
-//   production (default)  "Internet Vids", com.roanjtaylor.internetvids. The
+//   production (default)  "YouTube", com.roanjtaylor.internetvids. The
 //                         standalone app on TestFlight.
-//   development           "Internet Vids Dev", com.roanjtaylor.internetvids.dev.
+//   development           "YouTube Dev", com.roanjtaylor.internetvids.dev.
 //                         A development client that loads code live from
 //                         `npx expo start --dev-client`. Installed next to
 //                         the production app, never replacing it.

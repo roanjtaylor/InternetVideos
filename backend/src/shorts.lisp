@@ -1,4 +1,4 @@
-(in-package #:internet-vids)
+(in-package #:internet-videos)
 
 ;;; youtube.com/shorts/<id> answers 200 for a Short and redirects to /watch
 ;;; for a normal video. Cached forever per id; the fact never changes.

@@ -30,7 +30,7 @@ export default function SignInScreen() {
       <View style={styles.logo}>
         <Ionicons name="play" size={28} color="#fff" style={{ marginLeft: 4 }} />
       </View>
-      <Text style={[styles.title, { color: t.text }]}>Internet Vids</Text>
+      <Text style={[styles.title, { color: t.text }]}>YouTube</Text>
       <Text style={[styles.sub, { color: t.secondary }]}>
         Your subscriptions, playlists and search. Nothing recommended, no Shorts, no ads.
       </Text>

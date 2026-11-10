@@ -2,8 +2,8 @@
 ;;;   sbcl --non-interactive --load smoke.lisp
 (load (merge-pathnames "quicklisp/setup.lisp" (user-homedir-pathname)))
 (push (directory-namestring *load-truename*) asdf:*central-registry*)
-(ql:quickload "internet-vids" :silent t)
-(in-package :internet-vids)
+(ql:quickload "internet-videos" :silent t)
+(in-package :internet-videos)
 
 (format t "~%duration PT1H2M3S -> ~A~%" (parse-iso8601-duration "PT1H2M3S"))
 (format t "probe normal video -> ~A~%" (probe-short "dQw4w9WgXcQ"))

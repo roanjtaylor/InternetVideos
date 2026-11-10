@@ -1,4 +1,4 @@
-(in-package #:internet-vids)
+(in-package #:internet-videos)
 
 ;;; Configuration lives in backend/config.json (gitignored). Shape:
 ;;; {"client_id": "...", "client_secret": "...", "refresh_token": "...",
@@ -6,7 +6,7 @@
 
 (defvar *config-path*
   (merge-pathnames "config.json"
-                   (asdf:system-source-directory "internet-vids")))
+                   (asdf:system-source-directory "internet-videos")))
 
 (defvar *config* (make-hash-table :test 'equal))
 

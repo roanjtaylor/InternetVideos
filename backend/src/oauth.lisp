@@ -1,4 +1,4 @@
-(in-package #:internet-vids)
+(in-package #:internet-videos)
 
 (defparameter *scope* "https://www.googleapis.com/auth/youtube.readonly")
 (defparameter *token-url* "https://oauth2.googleapis.com/token")

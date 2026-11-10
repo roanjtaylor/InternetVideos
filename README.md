@@ -1,4 +1,4 @@
-# Internet Vids
+# InternetVideos
 
 A distraction-free YouTube for iPhone: subscriptions, playlists and search.
 No home feed, no recommendations, no Shorts, no comments, no autoplay-next.
@@ -23,7 +23,7 @@ Mode ("Ask"); YouTube's in-app Gemini is not open to other apps.
 ## One-time setup
 
 ### 1. Google Cloud (10 minutes)
-1. https://console.cloud.google.com → new project, e.g. `internet-vids`.
+1. https://console.cloud.google.com → new project, e.g. `internet-videos`.
 2. APIs & Services → Library → enable **YouTube Data API v3**.
 3. APIs & Services → OAuth consent screen → External. Add yourself under
    **Test users**. Add scope `.../auth/youtube` (read and write: the app saves
@@ -54,8 +54,8 @@ built from the same code, chosen by `APP_VARIANT` (see `app/app.config.js`):
 
 | Variant | Name | Bundle ID | Purpose |
 |---|---|---|---|
-| production | Internet Vids | `com.roanjtaylor.internetvids` | The standalone app, via TestFlight |
-| development | Internet Vids Dev | `com.roanjtaylor.internetvids.dev` | A dev client that loads code live from the laptop |
+| production | YouTube | `com.roanjtaylor.internetvids` | The standalone app, via TestFlight |
+| development | YouTube Dev | `com.roanjtaylor.internetvids.dev` | A dev client that loads code live from the laptop |
 
 Each needs its own iOS OAuth client in Google Cloud (step 1.4, with the
 matching bundle ID). The production client ID lives in `app/.env` and the
@@ -71,7 +71,7 @@ npx eas-cli build --profile development-testflight --platform ios
 npx eas-cli submit --profile development-testflight --platform ios
 ```
 Add yourself as an internal tester in App Store Connect and install
-"Internet Vids Dev" from the TestFlight app. Rebuild it only when native code
+"YouTube Dev" from the TestFlight app. Rebuild it only when native code
 changes (a new native library, or `app.json` changes to plugins, bundle ID or
 URL schemes).
 
@@ -80,7 +80,7 @@ URL schemes).
 cd app
 npx expo start --dev-client
 ```
-Open Internet Vids Dev and connect to the laptop; edits show up on save.
+Open YouTube Dev and connect to the laptop; edits show up on save.
 
 **Release.** When a change is ready, ship the standalone app:
 ```
