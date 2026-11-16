@@ -3,6 +3,7 @@
  * by direct YouTube API calls on the device with caching in front.
  */
 import { cached, clearCache } from './cache';
+import { refreshSaved, savedPlaylists, savePlaylist, unsavePlaylist } from './saved';
 import * as yt from './youtube';
 import type { Video } from './youtube';
 
@@ -23,6 +24,40 @@ export const api = {
       yt.playlistVideos(yt.uploadsPlaylistId(id), page, { dropShorts: true }),
     ),
   playlists: async () => ({ playlists: await cached('playlists', 5 * MIN, yt.myPlaylists) }),
+  /**
+   * The Playlists tab: your own playlists plus the ones saved from other
+   * channels. Saved ones are refreshed by id (1 unit per 50); if that fails
+   * the stored snapshots stand in.
+   */
+  library: async () => {
+    const [own, saved] = await Promise.all([cached('playlists', 5 * MIN, yt.myPlaylists), savedPlaylists()]);
+    let others = saved;
+    if (saved.length) {
+      try {
+        const ids = saved.map((p) => p.id);
+        others = await refreshSaved(await cached('playlists:saved', 5 * MIN, () => yt.playlistsById(ids)));
+      } catch {
+        // offline or out of quota: show what was saved
+      }
+    }
+    const ownIds = new Set(own.map((p) => p.id));
+    return { playlists: [...own, ...others.filter((p) => !ownIds.has(p.id))] };
+  },
+  /** True for Liked videos and playlists you created: the ones you can edit. */
+  ownsPlaylist: async (id: string) =>
+    id === 'LL' || (await cached('playlists', 5 * MIN, yt.myPlaylists)).some((p) => p.id === id),
+  channelPlaylists: (channelId: string) => cached(`chpl:${channelId}`, 30 * MIN, () => yt.channelPlaylists(channelId)),
+  /** Keep someone else's playlist in your library. Looks it up when only the id is known (1 unit). */
+  savePlaylist: async (playlist: yt.Playlist | string) => {
+    const p = typeof playlist === 'string' ? (await yt.playlistsById([playlist]))[0] : playlist;
+    if (!p) throw new Error('This playlist is private or no longer exists.');
+    await savePlaylist(p);
+    await clearCache('playlists:saved');
+  },
+  unsavePlaylist: async (id: string) => {
+    await unsavePlaylist(id);
+    await clearCache('playlists:saved');
+  },
   playlist: (id: string, page?: string | null) =>
     cached(`pl:${id}:${page ?? ''}`, 5 * MIN, () => yt.playlistVideos(id, page)),
   search: (q: string, page?: string | null) =>

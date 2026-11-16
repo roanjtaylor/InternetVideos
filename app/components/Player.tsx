@@ -2,7 +2,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { usePathname, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Image,
@@ -25,15 +25,19 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import YoutubePlayer, { YoutubeIframeRef } from 'react-native-youtube-iframe';
 
+import { PlayerControls } from '@/components/PlayerControls';
+import { embed, PlayerEmbed } from '@/components/PlayerEmbed';
 import { api, ChannelInfo, formatCount, Rating, shortDate, timeAgo, Video } from '@/lib/api';
 import { saveProgress } from '@/lib/history';
-import { allowRotation, lockPortrait } from '@/lib/orientation';
+import { allowRotation, lockLandscape, lockPortrait } from '@/lib/orientation';
+import { shareVideo } from '@/lib/share';
 import {
   closePlayer,
   expandPlayer,
+  getPlayback,
   minimizePlayer,
+  resetPlayback,
   setPlaying,
   togglePlaying,
   updateVideo,
@@ -51,88 +55,18 @@ const SPRING = { damping: 22, stiffness: 240, mass: 0.8 };
 const PROGRESS_EVERY_MS = 5000;
 
 /**
- * Runs inside the embed page. Three fixes to YouTube's defaults:
+ * The one player, mounted once in the root layout above the navigator, and
+ * kept mounted (hidden) when no video is open so that the embed inside it
+ * stays warm and the next video starts at once.
  *
- * - Autoplay. Start as soon as the player is ready (and when a video is
- *   merely cued), so a tap on a thumbnail is the only tap needed.
- * - Captions. YouTube remembers a "captions on" preference in its cookies
- *   and ignores cc_load_policy=0 for it, so unload the captions module as
- *   soon as the player exists and again whenever playback starts.
- * - Quality. The embed picks a quality for its CSS size, and a phone-wide
- *   player gets 360p. Ask for the best level the video offers instead, via
- *   setPlaybackQualityRange (the player's own, undocumented, call that the
- *   HD browser extensions use) with the documented setPlaybackQuality as a
- *   fallback. Re-applied on every play and whenever the player drops it.
- */
-const EMBED_FIXES_JS = `
-(function () {
-  var ORDER = ['highres', 'hd2880', 'hd2160', 'hd1440', 'hd1080', 'hd720', 'large', 'medium', 'small', 'tiny'];
-  function killCaptions() {
-    try { window.player.unloadModule('captions'); } catch (e) {}
-    try { window.player.unloadModule('cc'); } catch (e) {}
-  }
-  function best() {
-    var levels = [];
-    try { levels = window.player.getAvailableQualityLevels() || []; } catch (e) {}
-    for (var i = 0; i < ORDER.length; i++) if (levels.indexOf(ORDER[i]) >= 0) return ORDER[i];
-    return levels[0] || 'hd1080';
-  }
-  function maxQuality() {
-    var q = best();
-    var p = window.player;
-    try { if (typeof p.setPlaybackQualityRange === 'function') p.setPlaybackQualityRange(q, q); } catch (e) {}
-    try { p.setPlaybackQuality(q); } catch (e) {}
-  }
-  function fix() { killCaptions(); maxQuality(); }
-  function autoplay() { try { window.player.playVideo(); } catch (e) {} }
-  var tries = 0;
-  var t = setInterval(function () {
-    tries++;
-    var p = window.player;
-    if (p && typeof p.addEventListener === 'function') {
-      clearInterval(t);
-      fix();
-      try {
-        p.addEventListener('onReady', function () { fix(); autoplay(); });
-        p.addEventListener('onStateChange', function (e) {
-          if (!e) return;
-          if (e.data === 5) autoplay();
-          if (e.data === 1 || e.data === 3) fix();
-        });
-        p.addEventListener('onPlaybackQualityChange', function (e) {
-          if (e && e.data && e.data !== best()) setTimeout(maxQuality, 500);
-        });
-      } catch (e) {}
-    } else if (tries > 150) {
-      clearInterval(t);
-    }
-  }, 200);
-})();
-true;
-`;
-
-// Hoisted so the WebView never sees a new props object on re-render.
-const WEBVIEW_PROPS = {
-  allowsInlineMediaPlayback: true,
-  mediaPlaybackRequiresUserAction: false,
-  allowsBackForwardNavigationGestures: false,
-  scrollEnabled: false,
-  bounces: false,
-  overScrollMode: 'never' as const,
-  androidLayerType: 'hardware' as const,
-  injectedJavaScript: EMBED_FIXES_JS,
-};
-
-/**
- * The one player, mounted once in the root layout above the navigator.
- *
- * Playback itself is YouTube's own embed with its native controls. We add
- * the YouTube-app behaviours around it:
+ * Playback is YouTube's embed (PlayerEmbed) with our own controls drawn over
+ * it (PlayerControls). Around them, the YouTube-app behaviours:
  *
  * - Full mode. Portrait: the video on top (drag it down to minimise), then
  *   a one-line title (tap for the rest and the description), the channel
  *   with a Subscribe button, views, likes and date, and Like, Save and Ask
- *   buttons. Rotate the phone for full screen: the video alone on black.
+ *   buttons. Rotate the phone, or press the full screen button, for full
+ *   screen: the video alone on black.
  * - Mini mode: a small floating window of just the video that keeps playing
  *   while you browse, never over the tab bar. Play/pause top left, close
  *   top right. Drag it around, pinch to resize, drag or fling it up (or
@@ -140,8 +74,6 @@ const WEBVIEW_PROPS = {
  * - Progress is saved every few seconds, so the next open resumes.
  */
 export function Player() {
-  const { video } = usePlayer();
-  if (!video) return null;
   return <PlayerView />;
 }
 
@@ -153,7 +85,7 @@ function PlayerView() {
   const { width: W, height: H } = useWindowDimensions();
   const landscape = W > H;
   const isMini = mode === 'mini';
-  const playerRef = useRef<YoutubeIframeRef>(null);
+  const open = !!video;
 
   // Full-size video box: full width in portrait; in landscape as large as fits, letterboxed.
   const videoW = landscape ? Math.min(W, Math.round((H * 16) / 9)) : W;
@@ -205,72 +137,52 @@ function PlayerView() {
 
   // Full mode follows the phone; mini mode and no video are portrait only.
   useEffect(() => {
-    if (mode === 'full') allowRotation();
+    if (open && mode === 'full') allowRotation();
     else lockPortrait();
-  }, [mode]);
+  }, [mode, open]);
   useEffect(() => () => {
     lockPortrait();
   }, []);
 
-  // ---- Progress: remembered every few seconds so the next open resumes ------
-  const lastTime = useRef<{ pos: number; dur: number }>({ pos: 0, dur: 0 });
+  // ---- The embed: load on open, stop on close, follow play/pause. Progress is
+  // remembered every few seconds so the next open resumes. -------------------
   const videoId = video?.id;
   const flushProgress = useCallback(() => {
-    if (videoId && lastTime.current.pos > 0) saveProgress(videoId, lastTime.current.pos, lastTime.current.dur);
+    if (!videoId) return;
+    const pb = getPlayback();
+    if (pb.status === 'ended') saveProgress(videoId, pb.duration, pb.duration);
+    else if (pb.time > 0) saveProgress(videoId, pb.time, pb.duration);
   }, [videoId]);
+
   useEffect(() => {
-    if (!playing) return;
-    const tick = async () => {
-      try {
-        const [pos, dur] = await Promise.all([playerRef.current!.getCurrentTime(), playerRef.current!.getDuration()]);
-        lastTime.current = { pos, dur };
-        flushProgress();
-      } catch {
-        // player not ready yet
-      }
-    };
-    const id = setInterval(tick, PROGRESS_EVERY_MS);
-    return () => clearInterval(id);
-  }, [playing, session, flushProgress]);
-  useEffect(() => {
-    lastTime.current = { pos: 0, dur: 0 };
+    if (!videoId) {
+      embed.stop();
+      resetPlayback();
+      return;
+    }
+    // The window may have been slid away and faded out when the last video closed.
+    alpha.value = 1;
+    resetPlayback(resumeAt, video?.duration ?? 0);
+    embed.load(videoId, resumeAt);
     return flushProgress; // the session ends: save where it got to
-  }, [session, flushProgress]);
-
-  const onStateChange = useCallback(
-    (state: string) => {
-      if (state === 'playing') setPlaying(true);
-      else if (state === 'paused') {
-        setPlaying(false);
-        playerRef.current
-          ?.getCurrentTime()
-          .then((pos) => {
-            lastTime.current.pos = pos;
-            flushProgress();
-          })
-          .catch(() => {});
-      } else if (state === 'ended' && videoId) {
-        setPlaying(false);
-        saveProgress(videoId, lastTime.current.dur || video?.duration || 0, lastTime.current.dur);
-        lastTime.current.pos = 0;
-      }
-    },
-    [flushProgress, videoId, video?.duration],
-  );
-
-  // Fixed for the life of this session: the WebView only reads them once.
-  const playerParams = useMemo(
-    () => ({
-      rel: false,
-      controls: true,
-      iv_load_policy: 3,
-      preventFullScreen: true,
-      modestbranding: true,
-      ...(resumeAt > 0 ? { start: resumeAt } : {}),
-    }),
+    // resumeAt and the duration are read once, as the session starts.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [session],
-  );
+  }, [session, videoId, flushProgress]);
+
+  useEffect(() => {
+    if (!videoId) return;
+    if (playing) embed.play();
+    else {
+      embed.pause();
+      flushProgress();
+    }
+  }, [playing, session, videoId, flushProgress]);
+
+  useEffect(() => {
+    if (!playing || !videoId) return;
+    const id = setInterval(flushProgress, PROGRESS_EVERY_MS);
+    return () => clearInterval(id);
+  }, [playing, session, videoId, flushProgress]);
 
   // ---- Gestures ---------------------------------------------------------------
   const toMini = useCallback(() => {
@@ -279,6 +191,23 @@ function PlayerView() {
   }, [landscape]);
   const toFull = useCallback(() => expandPlayer(), []);
   const dismiss = useCallback(() => closePlayer(), []);
+
+  // The full screen button holds the chosen orientation. Leaving full screen
+  // hands rotation back to the phone only if the button also entered it: then
+  // the phone is being held upright, and unlocking will not flip it back.
+  const enteredByButton = useRef(false);
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
+  const toggleFullscreen = useCallback(() => {
+    if (landscape) {
+      lockPortrait();
+      if (enteredByButton.current) setTimeout(() => modeRef.current === 'full' && allowRotation(), 800);
+      enteredByButton.current = false;
+    } else {
+      enteredByButton.current = true;
+      lockLandscape();
+    }
+  }, [landscape]);
 
   const travel = H - MINI_DEFAULT_W; // rough drag distance for the full-to-mini gesture
 
@@ -425,24 +354,24 @@ function PlayerView() {
     height: (miniW.value * 9) / 16,
   }));
 
-  if (!video) return null;
-
   const bg = landscape ? '#000' : t.background;
 
   return (
-    <View style={[styles.container, { width: W, height: H }]} pointerEvents={isMini ? 'box-none' : 'auto'}>
-      <StatusBar hidden={!isMini} />
+    <View
+      style={[styles.container, { width: W, height: H, opacity: open ? 1 : 0 }]}
+      pointerEvents={!open ? 'none' : isMini ? 'box-none' : 'auto'}>
+      {open && <StatusBar hidden={!isMini} />}
       <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: bg }, backdrop]} pointerEvents="none" />
 
       {/* Portrait, full mode: title, channel, counts, actions, description. */}
-      {!landscape && (
+      {!landscape && video && (
         <Animated.View
           style={[styles.details, { top: videoTop + videoH }, backdrop]}
           pointerEvents={isMini ? 'none' : 'auto'}>
           <Details
             video={video}
             onSeek={(sec) => {
-              playerRef.current?.seekTo(sec, true);
+              embed.seek(sec);
               setPlaying(true);
             }}
           />
@@ -459,16 +388,16 @@ function PlayerView() {
       <GestureDetector gesture={gesture}>
         <Animated.View
           style={[styles.videoBox, { width: videoW, height: videoH, overflow: 'hidden' }, videoBox]}>
-          <YoutubePlayer
-            key={session}
-            ref={playerRef}
-            height={videoH}
+          {/* The embed takes no touches: every gesture belongs to the app. */}
+          <View style={StyleSheet.absoluteFill} pointerEvents="none">
+            <PlayerEmbed />
+          </View>
+          <PlayerControls
+            active={open && !isMini}
+            landscape={landscape}
             width={videoW}
-            videoId={video.id}
-            play={playing}
-            onChangeState={onStateChange}
-            initialPlayerParams={playerParams}
-            webViewProps={WEBVIEW_PROPS}
+            onMinimise={toMini}
+            onFullscreen={toggleFullscreen}
           />
         </Animated.View>
       </GestureDetector>
@@ -500,7 +429,7 @@ function PlayerView() {
 /**
  * Under the video in portrait: a one-line title (tap to show all of it and
  * the description), the channel row with Subscribe, counts, and the Like,
- * Save and Ask buttons. Details missing from the list row (views, likes,
+ * Share, Save and Ask buttons (the row scrolls sideways). Details missing from the list row (views, likes,
  * description) are fetched once per video.
  */
 function Details({ video, onSeek }: { video: Video; onSeek: (seconds: number) => void }) {
@@ -644,7 +573,7 @@ function Details({ video, onSeek }: { video: Video; onSeek: (seconds: number) =>
         </Pressable>
       </View>
 
-      <View style={styles.actions}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.actions}>
         <View style={[styles.rateGroup, { backgroundColor: t.surface }]}>
           <Pressable onPress={() => rate('like')} style={({ pressed }) => [styles.rateBtn, pressed && { opacity: 0.6 }]}>
             <MaterialIcons name={rating === 'like' ? 'thumb-up' : 'thumb-up-off-alt'} size={20} color={t.text} />
@@ -661,13 +590,14 @@ function Details({ video, onSeek }: { video: Video; onSeek: (seconds: number) =>
             />
           </Pressable>
         </View>
+        <ActionButton icon="arrow-redo-outline" label="Share" onPress={() => shareVideo(video)} />
         <ActionButton
           icon="bookmark-outline"
           label="Save"
           onPress={() => router.push({ pathname: '/save/[id]', params: { id: video.id, title: video.title } })}
         />
         <ActionButton icon="sparkles-outline" label="Ask" onPress={ask} />
-      </View>
+      </ScrollView>
 
       {expanded ? (
         <View style={[styles.description, { backgroundColor: t.surface }]}>
@@ -780,8 +710,8 @@ const styles = StyleSheet.create({
   details: { position: 'absolute', left: 0, right: 0, bottom: 0 },
   title: { fontSize: 18, fontWeight: '600', lineHeight: 24, paddingHorizontal: 16, paddingTop: 12 },
   meta: { fontSize: 13, paddingHorizontal: 16, paddingTop: 4 },
-  rateGroup: { flex: 1.4, flexDirection: 'row', alignItems: 'center', height: 36, borderRadius: 18, overflow: 'hidden' },
-  rateBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, height: 36 },
+  rateGroup: { flexDirection: 'row', alignItems: 'center', height: 36, borderRadius: 18, overflow: 'hidden' },
+  rateBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, height: 36, paddingHorizontal: 16 },
   rateDivider: { width: StyleSheet.hairlineWidth, height: 20, opacity: 0.6 },
   seeMoreBtn: { marginHorizontal: 16, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   seeMore: { fontSize: 14, fontWeight: '600' },
@@ -801,14 +731,13 @@ const styles = StyleSheet.create({
   subscribeText: { fontSize: 14, fontWeight: '600' },
   actions: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingVertical: 14 },
   action: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
     height: 36,
     borderRadius: 18,
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
   },
   actionText: { fontSize: 14, fontWeight: '600', flexShrink: 1 },
   description: { marginHorizontal: 16, padding: 12, borderRadius: 12, gap: 10 },

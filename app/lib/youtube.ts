@@ -42,6 +42,10 @@ export type Playlist = {
   lastAdded?: string | null; // ISO date of the newest addition
   createdAt?: string | null; // ISO date the playlist was made
   privacy: PlaylistPrivacy;
+  /** Who made it. */
+  channelTitle?: string | null;
+  /** Someone else's playlist kept in your library (see lib/saved.ts). */
+  saved?: boolean;
 };
 
 export type Channel = {
@@ -449,14 +453,8 @@ async function likedVideosPlaylist(): Promise<Playlist> {
   };
 }
 
-
-/** Liked videos plus your own playlists, newest addition first. */
-export async function myPlaylists(): Promise<Playlist[]> {
-  const [liked, own] = await Promise.all([
-    likedVideosPlaylist().catch(() => null),
-    ytGetAll('playlists', { part: 'snippet,contentDetails,status', mine: 'true', maxResults: 50 }),
-  ]);
-  const playlists: Playlist[] = own.map((p) => ({
+function playlistFromItem(p: any): Playlist {
+  return {
     id: p.id,
     title: p.snippet?.title,
     itemCount: p.contentDetails?.itemCount ?? 0,
@@ -464,7 +462,37 @@ export async function myPlaylists(): Promise<Playlist[]> {
     lastAdded: p.snippet?.publishedAt ?? null,
     createdAt: p.snippet?.publishedAt ?? null,
     privacy: (p.status?.privacyStatus as PlaylistPrivacy) ?? 'private',
-  }));
+    channelTitle: p.snippet?.channelTitle ?? null,
+  };
+}
+
+/** A channel's public playlists, newest first. 1 unit per 50. */
+export async function channelPlaylists(channelId: string): Promise<Playlist[]> {
+  const items = await ytGetAll('playlists', { part: 'snippet,contentDetails,status', channelId, maxResults: 50 }, 4);
+  return items.map(playlistFromItem).sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
+}
+
+/** Playlists by id (anyone's, if public or unlisted). Missing ones are simply absent. 1 unit per 50. */
+export async function playlistsById(ids: string[]): Promise<Playlist[]> {
+  const out: Playlist[] = [];
+  for (let i = 0; i < ids.length; i += 50) {
+    const resp = await ytGet('playlists', {
+      part: 'snippet,contentDetails,status',
+      id: ids.slice(i, i + 50).join(','),
+      maxResults: 50,
+    });
+    out.push(...(resp.items ?? []).map(playlistFromItem));
+  }
+  return out;
+}
+
+/** Liked videos plus your own playlists, newest addition first. */
+export async function myPlaylists(): Promise<Playlist[]> {
+  const [liked, own] = await Promise.all([
+    likedVideosPlaylist().catch(() => null),
+    ytGetAll('playlists', { part: 'snippet,contentDetails,status', mine: 'true', maxResults: 50 }),
+  ]);
+  const playlists: Playlist[] = own.map(playlistFromItem);
   const dates = await pool(playlists, 6, (p) => playlistLastAdded(p.id, 5));
   dates.forEach((d, i) => {
     if (!(d instanceof Error) && d) playlists[i].lastAdded = d;

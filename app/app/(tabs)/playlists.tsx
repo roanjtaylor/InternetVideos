@@ -2,13 +2,16 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Easing, FlatList, Image, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { Alert, Animated, Easing, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 
 import { ActionSheet } from '@/components/ActionSheet';
+import { PlaylistRow } from '@/components/PlaylistRow';
 import { Skeleton } from '@/components/Skeleton';
 import { api, Playlist, PlaylistPrivacy, timeAgo } from '@/lib/api';
 import { useLoadingBar } from '@/lib/loading';
 import { pinnedPlaylists, togglePin, usePins } from '@/lib/pins';
+import { useSavedPlaylists } from '@/lib/saved';
+import { afterSheet, sharePlaylist } from '@/lib/share';
 import { useTheme } from '@/lib/theme';
 
 type Sort = 'updated' | 'created' | 'alpha' | 'count';
@@ -39,8 +42,9 @@ function arrange(shown: Playlist[], sort: Sort): Playlist[] {
 }
 
 /**
- * Playlists: your own plus Liked videos, with a sort dropdown beside the
- * title. The kebab on a row pins it to Home.
+ * Playlists: your own, Liked videos, and the ones saved from other channels,
+ * with a sort dropdown beside the title. The kebab on a row pins it to Home,
+ * shares it, or removes a saved one from the library.
  */
 export default function PlaylistsScreen() {
   const router = useRouter();
@@ -122,15 +126,17 @@ export default function PlaylistsScreen() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      setPlaylists((await api.playlists()).playlists);
+      setPlaylists((await api.library()).playlists);
     } catch (e: any) {
       setError(e.message ?? String(e));
     }
   }, []);
 
+  // Also reloads when a playlist is saved or removed on another screen.
+  const savedKey = useSavedPlaylists()?.map((p) => p.id).join(',');
   useEffect(() => {
     load();
-  }, [load]);
+  }, [load, savedKey]);
 
   const shown = useMemo(() => (playlists ? arrange(playlists, sort) : null), [playlists, sort]);
   const pinnedIds = useMemo(
@@ -173,45 +179,25 @@ export default function PlaylistsScreen() {
         renderItem={({ item }) => {
           const pinned = pinnedIds.has(item.id);
           return (
-            <Pressable
+            <PlaylistRow
+              playlist={item}
+              subtitle={
+                (pinned ? 'Pinned to Home · ' : '') +
+                (item.saved
+                  ? `${item.channelTitle ? `${item.channelTitle} · ` : ''}Playlist`
+                  : PRIVACY_LABEL[item.privacy] +
+                    (item.id !== 'LL' ? ' playlist' : '') +
+                    (item.lastAdded ? ` · updated ${timeAgo(item.lastAdded)}` : ''))
+              }
               onPress={() => router.push({ pathname: '/playlist/[id]', params: { id: item.id, title: item.title } })}
-              onLongPress={() => setMenuFor(item)}
-              style={({ pressed }) => [styles.row, pressed && { backgroundColor: t.surface }]}>
-              <View style={styles.thumbWrap}>
-                {item.thumbnail ? (
-                  <Image source={{ uri: item.thumbnail }} style={styles.thumb} />
-                ) : (
-                  <View style={[styles.thumb, { backgroundColor: t.surfaceHigh }]} />
-                )}
-                <View style={styles.countBadge}>
-                  <Ionicons name={item.id === 'LL' ? 'thumbs-up' : 'list'} size={12} color="#fff" />
-                  <Text style={styles.countText}>{item.itemCount}</Text>
-                </View>
-              </View>
-              <View style={{ flex: 1, justifyContent: 'center' }}>
-                <Text style={[styles.title, { color: t.text }]} numberOfLines={2}>
-                  {item.title}
-                </Text>
-                <Text style={[styles.sub, { color: t.secondary }]} numberOfLines={1}>
-                  {pinned ? 'Pinned to Home · ' : ''}
-                  {PRIVACY_LABEL[item.privacy]}
-                  {item.id !== 'LL' ? ' playlist' : ''}
-                  {item.lastAdded ? ` · updated ${timeAgo(item.lastAdded)}` : ''}
-                </Text>
-              </View>
-              <Pressable
-                hitSlop={10}
-                onPress={() => setMenuFor(item)}
-                style={({ pressed }) => [styles.kebab, pressed && { opacity: 0.5 }]}>
-                <Ionicons name="ellipsis-vertical" size={18} color={t.text} />
-              </Pressable>
-            </Pressable>
+              onMenu={() => setMenuFor(item)}
+            />
           );
         }}
         ListEmptyComponent={
           <View style={styles.center}>
             <Text style={{ color: t.secondary }}>
-              No playlists yet. Save a video to create one.
+              No playlists yet. Save a video to create one, or save a playlist from a channel.
             </Text>
           </View>
         }
@@ -268,6 +254,28 @@ export default function PlaylistsScreen() {
             icon: menuPinned ? 'pin' : 'pin-outline',
             onPress: () => menuFor && togglePin(menuFor.id, playlists),
           },
+          ...(menuFor && menuFor.id !== 'LL'
+            ? [
+                {
+                  key: 'share',
+                  label: 'Share',
+                  icon: 'arrow-redo-outline' as const,
+                  onPress: () => afterSheet(() => sharePlaylist(menuFor)),
+                },
+              ]
+            : []),
+          ...(menuFor?.saved
+            ? [
+                {
+                  key: 'unsave',
+                  label: 'Remove from library',
+                  icon: 'trash-outline' as const,
+                  destructive: true,
+                  onPress: () =>
+                    api.unsavePlaylist(menuFor.id).catch((e) => Alert.alert('Could not remove', e.message ?? String(e))),
+                },
+              ]
+            : []),
         ]}
       />
     </>
@@ -276,25 +284,7 @@ export default function PlaylistsScreen() {
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', paddingLeft: 12, paddingVertical: 8, gap: 12 },
-  thumbWrap: { width: 160, height: 90 },
   thumb: { width: 160, height: 90, borderRadius: 8 },
-  countBadge: {
-    position: 'absolute',
-    right: 0,
-    bottom: 0,
-    top: 0,
-    width: 56,
-    borderTopRightRadius: 8,
-    borderBottomRightRadius: 8,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 2,
-  },
-  countText: { color: '#fff', fontSize: 12, fontWeight: '600' },
-  title: { fontSize: 15, fontWeight: '500', lineHeight: 20 },
-  sub: { fontSize: 12, marginTop: 4 },
-  kebab: { width: 40, alignItems: 'center', paddingTop: 2 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12 },
   retryBtn: { paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20 },
   dropBtn: {

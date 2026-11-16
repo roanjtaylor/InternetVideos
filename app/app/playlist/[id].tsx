@@ -1,10 +1,15 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Alert, Pressable, View } from 'react-native';
 
 import { FilterButton, FilterSheet } from '@/components/FilterSheet';
 import { VideoList } from '@/components/VideoList';
 import { api, Video } from '@/lib/api';
+import { useSavedPlaylists } from '@/lib/saved';
+import { sharePlaylist } from '@/lib/share';
+import { useTheme } from '@/lib/theme';
 
 /** YouTube's playlist sort options, plus length since the app knows durations. */
 type Sort = 'manual' | 'added-new' | 'added-old' | 'published-new' | 'published-old' | 'popular' | 'longest' | 'shortest';
@@ -44,6 +49,34 @@ export default function PlaylistScreen() {
   const [sort, setSort] = useState<Sort>('manual');
   const [sheet, setSheet] = useState(false);
   const key = `playlist-sort:${id}`;
+  const t = useTheme();
+
+  // Only your own playlists can be edited; anyone else's can be saved to the library instead.
+  const [owned, setOwned] = useState<boolean | null>(id === 'LL' ? true : null);
+  useEffect(() => {
+    let alive = true;
+    api
+      .ownsPlaylist(id)
+      .then((o) => alive && setOwned(o))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [id]);
+  const isSaved = !!useSavedPlaylists()?.some((p) => p.id === id);
+  const [saving, setSaving] = useState(false);
+  const toggleSaved = async () => {
+    if (saving) return;
+    setSaving(true);
+    try {
+      if (isSaved) await api.unsavePlaylist(id);
+      else await api.savePlaylist(id);
+    } catch (e: any) {
+      Alert.alert('Could not save playlist', e.message ?? String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
 
   useEffect(() => {
     AsyncStorage.getItem(key)
@@ -64,13 +97,38 @@ export default function PlaylistScreen() {
       <Stack.Screen
         options={{
           title: title ?? 'Playlist',
-          headerRight: () => <FilterButton active={sort !== 'manual'} onPress={() => setSheet(true)} />,
+          headerRight: () => (
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              {id !== 'LL' && (
+                <Pressable
+                  hitSlop={8}
+                  accessibilityLabel="Share playlist"
+                  onPress={() => sharePlaylist({ id, title })}
+                  style={({ pressed }) => [{ paddingLeft: 16, paddingVertical: 6 }, pressed && { opacity: 0.5 }]}>
+                  <Ionicons name="arrow-redo-outline" size={24} color={t.text} />
+                </Pressable>
+              )}
+              {owned === false && (
+                <Pressable
+                  hitSlop={8}
+                  accessibilityLabel={isSaved ? 'Remove playlist from library' : 'Save playlist to library'}
+                  onPress={toggleSaved}
+                  style={({ pressed }) => [
+                    { paddingLeft: 16, paddingVertical: 6 },
+                    (pressed || saving) && { opacity: 0.5 },
+                  ]}>
+                  <Ionicons name={isSaved ? 'bookmark' : 'bookmark-outline'} size={24} color={t.text} />
+                </Pressable>
+              )}
+              <FilterButton active={sort !== 'manual'} onPress={() => setSheet(true)} />
+            </View>
+          ),
         }}
       />
       <VideoList
         load={load}
         sort={comparator}
-        playlistId={id}
+        playlistId={owned ? id : undefined}
         playlistTitle={title ?? 'playlist'}
         emptyText="This playlist is empty."
       />

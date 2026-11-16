@@ -21,6 +21,7 @@ import { useWatchHistory, watchedFraction } from '@/lib/history';
 import { useLoadingBar } from '@/lib/loading';
 import { openVideo } from '@/lib/player';
 import { isWatchLaterTitle } from '@/lib/pins';
+import { afterSheet, shareVideo } from '@/lib/share';
 import { useTheme } from '@/lib/theme';
 
 export type RowLayout = 'compact' | 'card';
@@ -84,6 +85,9 @@ export function VideoRow({
     }
   };
 
+  const openChannel = () =>
+    router.push({ pathname: '/channel/[id]', params: { id: video.channelId, title: video.channelTitle } });
+
   const actions: SheetAction[] = [
     playlistId
       ? {
@@ -106,12 +110,17 @@ export function VideoRow({
       onPress: () => router.push({ pathname: '/save/[id]', params: { id: video.id, title: video.title } }),
     },
     {
+      key: 'share',
+      label: 'Share',
+      icon: 'arrow-redo-outline',
+      onPress: () => afterSheet(() => shareVideo(video)),
+    },
+    {
       key: 'channel',
       label: video.channelTitle,
       icon: 'person-circle-outline',
       image: avatar,
-      onPress: () =>
-        router.push({ pathname: '/channel/[id]', params: { id: video.channelId, title: video.channelTitle } }),
+      onPress: openChannel,
     },
   ];
 
@@ -156,19 +165,31 @@ export function VideoRow({
           </View>
         </Pressable>
         <View style={styles.cardMeta}>
-          {avatar ? (
-            <Image source={{ uri: avatar }} style={styles.avatar} />
-          ) : (
-            <View style={[styles.avatar, { backgroundColor: t.surfaceHigh }]} />
-          )}
-          <Pressable onPress={open} style={{ flex: 1 }}>
-            <Text style={[styles.cardTitle, { color: t.text }]} numberOfLines={2}>
-              {video.title}
-            </Text>
-            <Text style={[styles.sub, { color: t.secondary }]} numberOfLines={1}>
-              {video.channelTitle} · {timeAgo(video.publishedAt)}
-            </Text>
+          {/* The avatar and the channel name open the channel; the title plays the video. */}
+          <Pressable onPress={openChannel} hitSlop={6} style={({ pressed }) => [pressed && { opacity: 0.6 }]}>
+            {avatar ? (
+              <Image source={{ uri: avatar }} style={styles.avatar} />
+            ) : (
+              <View style={[styles.avatar, { backgroundColor: t.surfaceHigh }]} />
+            )}
           </Pressable>
+          <View style={{ flex: 1 }}>
+            <Pressable onPress={open}>
+              <Text style={[styles.cardTitle, { color: t.text }]} numberOfLines={2}>
+                {video.title}
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={openChannel}
+              hitSlop={{ top: 4, bottom: 10 }}
+              accessibilityRole="link"
+              accessibilityLabel={`Open channel ${video.channelTitle}`}
+              style={({ pressed }) => [styles.cardChannel, pressed && { opacity: 0.6 }]}>
+              <Text style={[styles.sub, { color: t.secondary }]} numberOfLines={1}>
+                {video.channelTitle} · {timeAgo(video.publishedAt)}
+              </Text>
+            </Pressable>
+          </View>
           {kebab}
         </View>
         {sheet}
@@ -390,6 +411,7 @@ const styles = StyleSheet.create({
   cardThumbWrap: { width: '100%', aspectRatio: 16 / 9 },
   cardThumb: { width: '100%', height: '100%' },
   cardMeta: { flexDirection: 'row', paddingLeft: 12, paddingTop: 12, gap: 12 },
+  cardChannel: { alignSelf: 'flex-start', maxWidth: '100%', paddingBottom: 4 },
   cardTitle: { fontSize: 15, fontWeight: '500', lineHeight: 21 },
   avatar: { width: 36, height: 36, borderRadius: 18 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },

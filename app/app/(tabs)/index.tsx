@@ -10,6 +10,7 @@ import { api, formatDuration, Playlist, timeAgo, Video } from '@/lib/api';
 import { lastIncomplete, useWatchHistory, watchedFraction } from '@/lib/history';
 import { useLoadingBar } from '@/lib/loading';
 import { pinnedPlaylists, usePins } from '@/lib/pins';
+import { useSavedPlaylists } from '@/lib/saved';
 import { openVideo } from '@/lib/player';
 import { useTheme } from '@/lib/theme';
 
@@ -33,15 +34,17 @@ export default function HomeScreen() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      setPlaylists((await api.playlists()).playlists);
+      setPlaylists((await api.library()).playlists);
     } catch (e: any) {
       setError(e.message ?? String(e));
     }
   }, []);
 
+  // Reload when a playlist is saved or removed elsewhere, so pins stay resolvable.
+  const savedKey = useSavedPlaylists()?.map((p) => p.id).join(',');
   useEffect(() => {
     load();
-  }, [load]);
+  }, [load, savedKey]);
 
   const pinned = playlists && pins ? pinnedPlaylists(playlists, pins) : null;
   const resume = lastIncomplete(history)?.video ?? null;

@@ -11,8 +11,13 @@ Google removed watch history and the Watch Later queue from the Data API in
 2016, so the app keeps both itself: every video it plays goes into a local
 history with its playback position (so it resumes), and Home pins a playlist
 of yours called "Watch later" by default. The player fetches views, likes and
-the channel, and can like, save, subscribe and hand the video to Google's AI
-Mode ("Ask"); YouTube's in-app Gemini is not open to other apps.
+the channel, and can like, share, save, subscribe and hand the video to
+Google's AI Mode ("Ask"); YouTube's in-app Gemini is not open to other apps.
+
+The API also only lists playlists you created, never ones you saved from
+other channels, so that library is kept on the phone too: open a channel's
+**Playlists**, save one (bookmark in the playlist's header, or the row menu),
+and it joins your Playlists tab.
 
 - `app/` Expo app (SDK 54, iOS 15.1+, so it runs on an iPhone 7). It talks to
   the YouTube Data API directly from the phone: sign in with Google once and

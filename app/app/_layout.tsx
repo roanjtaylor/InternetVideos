@@ -4,7 +4,7 @@ import { useFonts } from 'expo-font';
 import { Stack, usePathname, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 
@@ -15,6 +15,7 @@ import Colors from '@/constants/Colors';
 import { useAuth } from '@/lib/auth';
 import { lockPortrait } from '@/lib/orientation';
 import { closePlayer } from '@/lib/player';
+import { updateReady } from '@/lib/updates';
 
 export { ErrorBoundary } from 'expo-router';
 
@@ -41,6 +42,11 @@ export default function RootLayout() {
   const [loaded, error] = useFonts({ ...FontAwesome.font });
   const colorScheme = useColorScheme();
   const auth = useAuth();
+  // A fresh install waits here, behind the splash screen, for the latest update.
+  const [updated, setUpdated] = useState(false);
+  useEffect(() => {
+    updateReady.then(() => setUpdated(true));
+  }, []);
 
   useEffect(() => {
     if (error) throw error;
@@ -52,10 +58,10 @@ export default function RootLayout() {
   }, []);
 
   useEffect(() => {
-    if (loaded && auth.ready) SplashScreen.hideAsync();
-  }, [loaded, auth.ready]);
+    if (loaded && auth.ready && updated) SplashScreen.hideAsync();
+  }, [loaded, auth.ready, updated]);
 
-  if (!loaded || !auth.ready) return null;
+  if (!loaded || !auth.ready || !updated) return null;
 
   const dark = colorScheme === 'dark';
   const c = dark ? Colors.dark : Colors.light;
