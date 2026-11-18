@@ -26,9 +26,11 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { GeminiSheet } from '@/components/GeminiSheet';
 import { PlayerControls } from '@/components/PlayerControls';
 import { embed, PlayerEmbed } from '@/components/PlayerEmbed';
-import { api, ChannelInfo, formatCount, Rating, shortDate, timeAgo, Video } from '@/lib/api';
+import { api, ChannelInfo, formatCount, shortDate, timeAgo, Video } from '@/lib/api';
+import { rateVideo, useRating } from '@/lib/rating';
 import { saveProgress } from '@/lib/history';
 import { allowRotation, lockLandscape, lockPortrait } from '@/lib/orientation';
 import { shareVideo } from '@/lib/share';
@@ -439,14 +441,14 @@ function Details({ video, onSeek }: { video: Video; onSeek: (seconds: number) =>
   const [expanded, setExpanded] = useState(false);
   const [channel, setChannel] = useState<ChannelInfo | null>(null);
   const [subscriptionId, setSubscriptionId] = useState<string | null | undefined>(undefined);
-  const [rating, setRating] = useState<Rating | undefined>(undefined);
-  const [busy, setBusy] = useState<'sub' | 'like' | null>(null);
+  const { rating } = useRating(video.id);
+  const [busy, setBusy] = useState<'sub' | null>(null);
+  const [askOpen, setAskOpen] = useState(false);
 
   useEffect(() => {
     setExpanded(false);
     setChannel(null);
     setSubscriptionId(undefined);
-    setRating(undefined);
     let alive = true;
     // Always fetch: playlist and search rows carry a shortened description, and
     // this call (cached for half an hour, 1 unit) brings the full text and exact counts.
@@ -462,10 +464,6 @@ function Details({ video, onSeek }: { video: Video; onSeek: (seconds: number) =>
       .subscription(video.channelId)
       .then((id) => alive && setSubscriptionId(id))
       .catch(() => alive && setSubscriptionId(null));
-    api
-      .rating(video.id)
-      .then((r) => alive && setRating(r))
-      .catch(() => alive && setRating('none'));
     return () => {
       alive = false;
     };
@@ -488,34 +486,9 @@ function Details({ video, onSeek }: { video: Video; onSeek: (seconds: number) =>
     }
   };
 
-  const rate = async (target: 'like' | 'dislike') => {
-    if (busy || rating === undefined) return;
-    setBusy('like');
-    const prev = rating;
-    const next: Rating = prev === target ? 'none' : target;
-    setRating(next);
-    try {
-      if (next === 'like') await api.like(video.id);
-      else if (next === 'dislike') await api.dislike(video.id);
-      else await api.unlike(video.id);
-      if (video.likeCount !== undefined) {
-        const delta = (next === 'like' ? 1 : 0) - (prev === 'like' ? 1 : 0);
-        if (delta) updateVideo({ likeCount: Math.max(0, video.likeCount + delta) });
-      }
-    } catch (e: any) {
-      setRating(prev);
-      Alert.alert('Could not update rating', e.message ?? String(e));
-    } finally {
-      setBusy(null);
-    }
-  };
+  const rate = (target: 'like' | 'dislike') => rateVideo(video, target);
 
-  // YouTube's in-app Gemini is not open to other apps; Google's AI Mode is the
-  // nearest thing, and it reads the video from its link.
-  const ask = () => {
-    const q = `Tell me about this YouTube video and summarise it: https://www.youtube.com/watch?v=${video.id}`;
-    Linking.openURL(`https://www.google.com/search?udm=50&q=${encodeURIComponent(q)}`);
-  };
+  const ask = () => setAskOpen(true);
 
   const openChannel = () => {
     minimizePlayer();
@@ -590,10 +563,11 @@ function Details({ video, onSeek }: { video: Video; onSeek: (seconds: number) =>
             />
           </Pressable>
         </View>
-        <ActionButton icon="arrow-redo-outline" label="Share" onPress={() => shareVideo(video)} />
+        <ActionButton icon="arrow-redo-outline" label="Share" showLabel={false} onPress={() => shareVideo(video)} />
         <ActionButton
           icon="bookmark-outline"
           label="Save"
+          showLabel={false}
           onPress={() => router.push({ pathname: '/save/[id]', params: { id: video.id, title: video.title } })}
         />
         <ActionButton icon="sparkles-outline" label="Ask" onPress={ask} />
@@ -620,6 +594,7 @@ function Details({ video, onSeek }: { video: Video; onSeek: (seconds: number) =>
           <Text style={[styles.seeMore, { color: t.text }]}>See more</Text>
         </Pressable>
       )}
+      <GeminiSheet visible={askOpen} videoId={video.id} title={video.title} onClose={() => setAskOpen(false)} />
     </ScrollView>
   );
 }
@@ -672,11 +647,14 @@ function ActionButton({
   icon,
   label,
   active,
+  showLabel = true,
   onPress,
 }: {
   icon: React.ComponentProps<typeof Ionicons>['name'];
   label: string;
   active?: boolean;
+  /** YouTube shows Share and Save as bare icons; the label is then only for accessibility. */
+  showLabel?: boolean;
   onPress: () => void;
 }) {
   const t = useTheme();
@@ -684,15 +662,19 @@ function ActionButton({
   return (
     <Pressable
       onPress={onPress}
+      accessibilityLabel={label}
       style={({ pressed }) => [
         styles.action,
-        { backgroundColor: active ? t.text : t.surface },
-        pressed && { opacity: 0.75 },
+        !showLabel && styles.actionIcon,
+        active && { backgroundColor: t.text },
+        pressed && { opacity: 0.6 },
       ]}>
-      <Ionicons name={icon} size={18} color={fg} />
-      <Text style={[styles.actionText, { color: fg }]} numberOfLines={1}>
-        {label}
-      </Text>
+      <Ionicons name={icon} size={showLabel ? 18 : 24} color={fg} />
+      {showLabel && (
+        <Text style={[styles.actionText, { color: fg }]} numberOfLines={1}>
+          {label}
+        </Text>
+      )}
     </Pressable>
   );
 }
@@ -729,7 +711,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
   },
   subscribeText: { fontSize: 14, fontWeight: '600' },
-  actions: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingVertical: 14 },
+  actions: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 16, paddingVertical: 14 },
   action: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -739,6 +721,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     paddingHorizontal: 14,
   },
+  actionIcon: { paddingHorizontal: 10 },
   actionText: { fontSize: 14, fontWeight: '600', flexShrink: 1 },
   description: { marginHorizontal: 16, padding: 12, borderRadius: 12, gap: 10 },
   stats: { flexDirection: 'row', gap: 8 },

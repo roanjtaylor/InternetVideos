@@ -52,7 +52,9 @@ const HTML = `<!DOCTYPE html>
   function post(o) { try { window.ReactNativeWebView.postMessage(JSON.stringify(o)); } catch (e) {} }
 
   // YouTube remembers "captions on" in its cookies and ignores cc_load_policy for it.
+  var ccOn = false;
   function killCaptions() {
+    if (ccOn) return;
     try { player.unloadModule('captions'); } catch (e) {}
     try { player.unloadModule('cc'); } catch (e) {}
   }
@@ -103,6 +105,14 @@ const HTML = `<!DOCTYPE html>
     play: function () { if (ready) player.playVideo(); },
     pause: function () { if (ready) player.pauseVideo(); },
     seek: function (t) { if (ready) { player.seekTo(t, true); lastT = -1; } },
+    cc: function (on) {
+      ccOn = !!on;
+      if (!ready) return;
+      if (ccOn) {
+        try { player.loadModule('captions'); } catch (e) {}
+        try { player.setOption('captions', 'reload', true); } catch (e) {}
+      } else killCaptions();
+    },
     rate: function (r) { if (ready) player.setPlaybackRate(r); },
     stop: function () { cur = ''; if (ready) player.stopVideo(); }
   };
@@ -152,7 +162,7 @@ const FRAME_JS = `
     if (!/(^|\\.)youtube(-nocookie)?\\.com$/.test(location.hostname)) return;
     var css = '.ytp-chrome-top,.ytp-gradient-top,.ytp-watermark,.ytp-pause-overlay,.ytp-pause-overlay-container,' +
       '.ytp-endscreen-content,.html5-endscreen,.ytp-ce-element,.ytp-cards-teaser,.ytp-cards-button,' +
-      '.ytp-large-play-button,.ytp-spinner,.ytp-bezel,.ytp-doubletap-ui-legacy{display:none !important;opacity:0 !important}';
+      '.ytp-title,.ytp-title-channel,.ytp-title-beacon,.ytp-chrome-top-buttons,.ytp-share-button,.ytp-youtube-button,.ytp-impression-link,.ytp-gradient-bottom,.ytp-videowall-still,.ytp-suggestions,.ytp-related-on-error-overlay,.ytp-large-play-button,.ytp-spinner,.ytp-bezel,.ytp-doubletap-ui-legacy{display:none !important;opacity:0 !important}';
     function add() {
       var s = document.createElement('style');
       s.textContent = css;
@@ -196,6 +206,7 @@ export const embed = {
   },
   seekBy: (delta: number) => embed.seek(getPlayback().time + delta),
   setRate: (rate: number) => run(`iv.rate(${rate})`),
+  setCaptions: (on: boolean) => run(`iv.cc(${on})`),
   stop() {
     wanted = null;
     run('iv.stop()');

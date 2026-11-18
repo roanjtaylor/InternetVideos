@@ -124,16 +124,21 @@ async function ytFetch(
   body?: unknown,
 ) {
   await chargeQuota(units, method !== 'GET' ? 'writes' : units >= 100 ? 'search' : 'reads');
+  const send = (token: string) =>
+    fetch(url(endpoint, params), {
+      method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        ...(body ? { 'Content-Type': 'application/json' } : {}),
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
   const token = await getAccessToken();
-  const res = await fetch(url(endpoint, params), {
-    method,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: 'application/json',
-      ...(body ? { 'Content-Type': 'application/json' } : {}),
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  let res = await send(token);
+  // A token Google stopped honouring early: refresh once and retry. If the
+  // refresh token is dead too, this throws SessionExpired and signs out.
+  if (res.status === 401) res = await send(await getAccessToken(token));
   if (res.status === 204) return {};
   const text = await res.text();
   let json: any = {};
@@ -563,12 +568,20 @@ export async function removeFromPlaylist(playlistItemId: string): Promise<void> 
   await ytDelete('playlistItems', { id: playlistItemId });
 }
 
-export async function addToPlaylist(playlistId: string, videoId: string): Promise<void> {
-  await ytPost(
+/** The playlist item holding this video in a playlist, or null (1 unit). */
+export async function findInPlaylist(playlistId: string, videoId: string): Promise<string | null> {
+  const resp = await ytGet('playlistItems', { part: 'id', playlistId, videoId, maxResults: 1 });
+  return resp.items?.[0]?.id ?? null;
+}
+
+/** Returns the new playlist item's id. */
+export async function addToPlaylist(playlistId: string, videoId: string): Promise<string> {
+  const resp = await ytPost(
     'playlistItems',
     { part: 'snippet' },
     { snippet: { playlistId, resourceId: { kind: 'youtube#video', videoId } } },
   );
+  return resp.id as string;
 }
 
 export async function createPlaylist(title: string, privacy: 'private' | 'unlisted' | 'public' = 'private') {

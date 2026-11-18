@@ -2,7 +2,7 @@
   "expo": {
     "name": "YouTube",
     "slug": "internet-vids",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "internetvids",
@@ -41,6 +41,11 @@
         }
       ],
       "expo-secure-store",
+      ["expo-audio", { "microphonePermission": false, "enableBackgroundPlayback": true }],
+      "expo-notifications",
+      "expo-background-task",
+      "expo-sqlite",
+      "expo-localization",
       ["expo-screen-orientation", { "initialOrientation": "PORTRAIT_UP" }],
       [
         "expo-splash-screen",

@@ -4,11 +4,12 @@ import React, { useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { RED } from '@/constants/Colors';
-import { GOOGLE_CLIENT_ID, signIn } from '@/lib/auth';
+import { GOOGLE_CLIENT_ID, signIn, useAuth } from '@/lib/auth';
 import { useTheme } from '@/lib/theme';
 
 export default function SignInScreen() {
   const t = useTheme();
+  const { expired } = useAuth();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -37,6 +38,11 @@ export default function SignInScreen() {
       <Pressable onPress={go} disabled={busy} style={({ pressed }) => [styles.button, pressed && { opacity: 0.8 }]}>
         {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Sign in with Google</Text>}
       </Pressable>
+      {expired && !error && (
+        <Text style={[styles.sub, { color: t.secondary, marginBottom: 0 }]}>
+          Your Google sign-in expired. One tap and you are back where you were.
+        </Text>
+      )}
       {!GOOGLE_CLIENT_ID && (
         <Text style={[styles.error, { color: t.danger }]}>
           Set EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID in app/.env, then restart the dev server.

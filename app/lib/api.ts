@@ -96,7 +96,14 @@ export const api = {
 
   /** Writes invalidate the playlist caches so the next view reflects them. */
   addToPlaylist: async (playlistId: string, videoId: string) => {
-    await yt.addToPlaylist(playlistId, videoId);
+    const itemId = await yt.addToPlaylist(playlistId, videoId);
+    await Promise.all([clearCache('playlists'), clearCache(`pl:${playlistId}`)]);
+    return itemId;
+  },
+  /** The playlist item for a video in a playlist, if it is in it. */
+  findInPlaylist: (playlistId: string, videoId: string) => yt.findInPlaylist(playlistId, videoId),
+  removePlaylistItem: async (playlistId: string, itemId: string) => {
+    await yt.removeFromPlaylist(itemId);
     await Promise.all([clearCache('playlists'), clearCache(`pl:${playlistId}`)]);
   },
   /** Liked videos (LL) has no playlist items to delete: un-liking removes it. */

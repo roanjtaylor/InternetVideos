@@ -94,7 +94,10 @@ export default function RootLayout() {
           }}>
           <Stack.Screen name="(tabs)" options={{ headerShown: false, title: 'Back' }} />
           <Stack.Screen name="sign-in" options={{ headerShown: false }} />
-          <Stack.Screen name="save/[id]" options={{ presentation: 'modal', title: 'Save video to…' }} />
+          <Stack.Screen
+            name="save/[id]"
+            options={{ presentation: 'transparentModal', animation: 'fade', headerShown: false, contentStyle: { backgroundColor: 'transparent' } }}
+          />
           <Stack.Screen name="playlist/[id]" />
           <Stack.Screen name="channel/[id]" />
           <Stack.Screen name="channels" options={{ title: 'All subscriptions' }} />
