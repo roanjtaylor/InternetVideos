@@ -594,7 +594,16 @@ function Details({ video, onSeek }: { video: Video; onSeek: (seconds: number) =>
           <Text style={[styles.seeMore, { color: t.text }]}>See more</Text>
         </Pressable>
       )}
-      <GeminiSheet visible={askOpen} videoId={video.id} title={video.title} onClose={() => setAskOpen(false)} />
+      <GeminiSheet
+        visible={askOpen}
+        videoId={video.id}
+        title={video.title}
+        onClose={() => setAskOpen(false)}
+        onSeek={(sec) => {
+          embed.seek(sec);
+          setPlaying(true);
+        }}
+      />
     </ScrollView>
   );
 }

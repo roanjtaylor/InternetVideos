@@ -14,18 +14,40 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { askGemini, GEMINI_KEY, SUGGESTIONS, Turn } from '@/lib/gemini';
+import { askGemini, GEMINI_KEY, Stage, SUGGESTIONS, Turn } from '@/lib/gemini';
 import { useTheme } from '@/lib/theme';
 
-type Props = { visible: boolean; videoId: string; title: string; onClose: () => void };
+type Props = { visible: boolean; videoId: string; title: string; onClose: () => void; onSeek?: (seconds: number) => void };
+
+const TIMESTAMP = /\b(?:(\d{1,2}):)?(\d{1,2}):(\d{2})\b/g;
+
+/** Split text so every m:ss / h:mm:ss becomes a tappable link that seeks the video. */
+function linkTimestamps(text: string, color: string, seek: (sec: number) => void): React.ReactNode[] {
+  const out: React.ReactNode[] = [];
+  let last = 0;
+  for (const m of text.matchAll(TIMESTAMP)) {
+    const at = m.index ?? 0;
+    if (at > last) out.push(text.slice(last, at));
+    const sec = (m[1] ? +m[1] * 3600 : 0) + +m[2] * 60 + +m[3];
+    out.push(
+      <Text key={at} onPress={() => seek(sec)} style={{ color, fontWeight: '600' }}>
+        {m[0]}
+      </Text>,
+    );
+    last = at + m[0].length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
+}
 
 /** Gemini about the video being watched, as a bottom sheet over the player: suggested questions, then a chat. */
-export function GeminiSheet({ visible, videoId, title, onClose }: Props) {
+export function GeminiSheet({ visible, videoId, title, onClose, onSeek }: Props) {
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
+  const [stage, setStage] = useState<Stage>("transcript");
   const [error, setError] = useState<string | null>(null);
   const scroll = useRef<ScrollView>(null);
 
@@ -37,17 +59,26 @@ export function GeminiSheet({ visible, videoId, title, onClose }: Props) {
     setInput('');
   }, [videoId]);
 
-  const send = async (text: string) => {
+  const send = (text: string) => {
     const q = text.trim();
     if (!q || busy) return;
-    const next: Turn[] = [...turns, { role: 'user', text: q }];
-    setTurns(next);
     setInput('');
+    return run([...turns, { role: 'user', text: q }]);
+  };
+
+  // Re-ask the last question (the failed user turn is still in the list).
+  const retry = () => {
+    if (busy || turns.length === 0 || turns[turns.length - 1].role !== 'user') return;
+    return run(turns);
+  };
+
+  const run = async (next: Turn[]) => {
+    setTurns(next);
     setError(null);
     setBusy(true);
     try {
-      const a = await askGemini(videoId, next);
-      setTurns((cur) => (cur === next || cur.length >= next.length ? [...next, { role: 'model', text: a }] : cur));
+      const a = await askGemini(videoId, next, setStage);
+      setTurns((cur) => (cur === next || cur.length >= next.length ? [...next, { role: 'model', ...a }] : cur));
     } catch (e: any) {
       setError(e.message === 'NO_KEY' ? 'NO_KEY' : (e.message ?? String(e)));
     } finally {
@@ -110,13 +141,35 @@ export function GeminiSheet({ visible, videoId, title, onClose }: Props) {
                       <Text style={[styles.text, { color: t.text }]}>{m.text}</Text>
                     </View>
                   ) : (
-                    <Text key={i} style={[styles.text, { color: t.text }]} selectable>
-                      {m.text}
-                    </Text>
+                    <View key={i} style={{ gap: 6 }}>
+                      <Text style={[styles.text, { color: t.text }]} selectable>
+                        {linkTimestamps(m.text, t.link, (sec) => {
+                          onSeek?.(sec);
+                          onClose();
+                        })}
+                      </Text>
+                      {!!m.note && <Text style={[styles.note, { color: t.secondary }]}>{m.note}</Text>}
+                    </View>
                   ),
                 )}
-                {busy && <ActivityIndicator color={t.secondary} style={{ alignSelf: 'flex-start' }} />}
-                {!!error && error !== 'NO_KEY' && <Text style={[styles.text, { color: t.danger }]}>{error}</Text>}
+                {busy && (
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                    <ActivityIndicator color={t.secondary} />
+                    <Text style={[styles.text, { color: t.secondary }]}>
+                      {stage === "transcript" ? "Reading the transcript…" : "Watching the video (slower)…"}
+                    </Text>
+                  </View>
+                )}
+                {!!error && error !== 'NO_KEY' && (
+                  <View style={{ gap: 8, alignItems: 'flex-start' }}>
+                    <Text style={[styles.text, { color: t.danger }]}>{error}</Text>
+                    <Pressable
+                      onPress={retry}
+                      style={({ pressed }) => [styles.chip, { backgroundColor: t.surface }, pressed && { opacity: 0.7 }]}>
+                      <Text style={[styles.text, { color: t.text, fontWeight: '600' }]}>Retry</Text>
+                    </Pressable>
+                  </View>
+                )}
               </>
             )}
           </ScrollView>
@@ -154,6 +207,7 @@ const styles = StyleSheet.create({
   headerTitle: { flex: 1, fontSize: 13 },
   body: { flex: 1 },
   text: { fontSize: 15, lineHeight: 22 },
+  note: { fontSize: 12, lineHeight: 16 },
   chip: { borderRadius: 16, paddingHorizontal: 14, paddingVertical: 12 },
   bubble: { alignSelf: 'flex-end', maxWidth: '85%', borderRadius: 16, paddingHorizontal: 14, paddingVertical: 10 },
   inputRow: {

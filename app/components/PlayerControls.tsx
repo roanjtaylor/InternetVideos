@@ -571,7 +571,7 @@ export function PlayerControls({ active, landscape, width, onMinimise, onFullscr
           </GestureDetector>
         </View>
       </Animated.View>
-      {!!video && <GeminiSheet visible={askOpen} videoId={video.id} title={video.title} onClose={() => setAskOpen(false)} />}
+      {!!video && <GeminiSheet visible={askOpen} videoId={video.id} title={video.title} onClose={() => setAskOpen(false)} onSeek={embed.seek} />}
     </View>
   );
 }
